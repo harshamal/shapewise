@@ -199,6 +199,8 @@ export const MODULES: readonly Module[] = [
       settings("custom_fields", "Custom fields", ["view", "manage"], { extension: "custom_fields", default: false }),
       settings("approval_rules", "Approval rules", ["view", "manage"], { core: true }),
       settings("numbering", "Numbering", ["view", "manage"], { core: true }),
+      settings("document_rules", "Sales and purchasing", ["view", "manage"], { core: true }),
+      settings("tax_settings", "Tax", ["view", "manage"], { core: true }),
       settings("inventory_rules", "Inventory rules", ["view", "manage"]),
       settings("units", "Units of measure", A.master),
       settings("item_classes", "Item classes", A.master),

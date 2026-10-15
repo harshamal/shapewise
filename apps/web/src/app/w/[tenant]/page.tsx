@@ -1,7 +1,7 @@
 import { EXTENSION_BY_KEY, MODULES, type Widget } from "@shapewise/blueprint";
 import { StatusPill } from "@shapewise/ui";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { loadWorkspace } from "@/lib/workspace";
+import { loadWorkspace, shellProps } from "@/lib/workspace";
 
 const METRIC_LABELS: Record<string, string> = {
   sales_this_month: "Sales this month",
@@ -29,11 +29,12 @@ const widgetLabel = (w: Widget) => w.label ?? (w.source.kind === "builtin" ? MET
 
 export default async function Overview({ params }: { params: Promise<{ tenant: string }> }) {
   const { tenant } = await params;
-  const { bp, sections, base, viewer } = await loadWorkspace(tenant);
+  const ws = await loadWorkspace(tenant);
+  const { bp } = ws;
   const modules = MODULES.filter((m) => !m.core && bp.modules.some((c) => c.key === m.key && c.enabled)).map((m) => m.label);
 
   return (
-    <WorkspaceShell base={base} workspaceName={bp.business.name} viewer={viewer} sections={sections} title="Overview">
+    <WorkspaceShell {...shellProps(ws)} title="Overview">
       <section aria-labelledby="metrics" className="grid gap-px overflow-hidden rounded-sw border bg-border sm:grid-cols-2 lg:grid-cols-4">
         <h2 id="metrics" className="sr-only">Key figures</h2>
         {bp.dashboard.map((w) => (

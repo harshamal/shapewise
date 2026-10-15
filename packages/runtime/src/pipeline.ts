@@ -68,7 +68,8 @@ export function createExecutor(deps: PipelineDeps) {
           if (prev) return prev;
         }
         const t = now();
-        const run: Run = { env, c, tx, now: t, today: t.toISOString().slice(0, 10), warnings: [], effects: {}, approved: Boolean(env.approvalId), newId };
+        const today = new Intl.DateTimeFormat("en-CA", { timeZone: c.bp.business.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(t);
+        const run: Run = { env, c, tx, now: t, today, warnings: [], effects: {}, approved: Boolean(env.approvalId), newId };
         const result = await handle(run, env.command);
         if (key && result.status !== "error") tx.putResult(key, result);
         return result;
@@ -155,6 +156,7 @@ async function create(run: Run, t: CTarget, input: Record<string, unknown>): Pro
     updatedBy: run.env.actor.id,
     links,
   };
+  await defaultDueDate(run, t, rec);
   await computeTotals(t, rec.data, run.tx);
   await computeFields(run, t, rec);
   await runRules(run, t, "create", rec);
@@ -446,6 +448,16 @@ async function computeFields(run: Run, t: CTarget, rec: StoredRecord) {
   const computed = t.fields.filter((f) => f.expr);
   if (!computed.length) return;
   for (const f of computed) rec.data[f.key] = await evalOn(run, t, rec, f.expr!);
+}
+
+/** Invoices and bills fall due after the party's payment terms, else the workspace default. */
+async function defaultDueDate(run: Run, t: CTarget, rec: StoredRecord) {
+  if (!t.fields.some((f) => f.key === "due_date") || rec.data.due_date || typeof rec.data.date !== "string") return;
+  const partyKey = t.fields.some((f) => f.key === "customer") ? "customer" : t.fields.some((f) => f.key === "vendor") ? "vendor" : undefined;
+  const party = partyKey && typeof rec.data[partyKey] === "string" ? await run.tx.get(partyKey, rec.data[partyKey] as string) : undefined;
+  const terms = typeof party?.data.payment_terms_days === "number" ? party.data.payment_terms_days : run.c.bp.settings.sales.defaultPaymentTermsDays;
+  const due = new Date(Date.parse(`${rec.data.date}T00:00:00Z`) + terms * 86_400_000);
+  rec.data.due_date = due.toISOString().slice(0, 10);
 }
 
 async function assignNumber(run: Run, t: CTarget, rec: StoredRecord) {

@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { NavSection } from "@shapewise/blueprint";
 import { cx } from "@shapewise/ui";
+import type { SettingsData } from "@/lib/settings-data";
 import { AccountMenu } from "./account-menu";
+import { SettingsDialog } from "./settings-dialog";
 
 /**
  * Workspace frame: a dark warm-grey rail (brand, sections → modules →
@@ -16,6 +18,7 @@ export function WorkspaceShell({
   workspaceName,
   viewer,
   sections,
+  settings,
   title,
   actions,
   children,
@@ -25,11 +28,42 @@ export function WorkspaceShell({
   workspaceName: string;
   viewer: { name: string; role: string | null } | null;
   sections: NavSection[];
+  settings: SettingsData;
   title: string;
   actions?: ReactNode;
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const params = useSearchParams();
+  // The open settings section lives in the URL (?settings=extensions), so it can be linked to.
+  const settingsTab = params.get("settings");
+
+  const openSettings = useCallback(
+    (tab?: string) => {
+      const next = new URLSearchParams(params.toString());
+      next.set("settings", tab ?? settingsTab ?? settings.tabs[0]?.key ?? "organisation");
+      router.replace(`${pathname}?${next}` as never, { scroll: false });
+    },
+    [params, pathname, router, settings.tabs, settingsTab],
+  );
+  const closeSettings = useCallback(() => {
+    const next = new URLSearchParams(params.toString());
+    next.delete("settings");
+    const q = next.toString();
+    router.replace(`${pathname}${q ? `?${q}` : ""}` as never, { scroll: false });
+  }, [params, pathname, router]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+        e.preventDefault();
+        openSettings();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openSettings]);
 
   return (
     <div className="grid min-h-dvh grid-cols-1 md:grid-cols-[var(--sw-rail-width)_1fr]">
@@ -82,11 +116,24 @@ export function WorkspaceShell({
           ))}
         </nav>
 
-        <div className="space-y-1 border-t border-white/10 px-5 py-3 text-sm">
+        <div className="border-t border-white/10 px-3 pt-2">
+          <button
+            type="button"
+            onClick={() => openSettings()}
+            aria-keyshortcuts="Control+Comma"
+            className="flex h-8 w-full items-center gap-2 rounded-sw-sm px-2 text-sm text-rail-muted hover:bg-rail-active hover:text-rail-ink"
+          >
+            <GearIcon />
+            Settings
+            <kbd className="ml-auto text-[11px] text-rail-muted/70">Ctrl ,</kbd>
+          </button>
+        </div>
+        <div className="space-y-1 px-5 py-3 text-sm">
           <p className="truncate text-rail-muted">{workspaceName}</p>
           <AccountMenu viewer={viewer} here={pathname} />
         </div>
       </aside>
+      <SettingsDialog data={settings} open={settingsTab !== null} tab={settingsTab ?? ""} onTab={openSettings} onClose={closeSettings} />
 
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-10 flex h-[var(--sw-topbar-height)] items-center gap-4 border-b bg-canvas/90 px-4 backdrop-blur md:px-6">
@@ -150,6 +197,15 @@ function NavLink({ href, active, small, children }: { href: string; active: bool
     >
       {children}
     </Link>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" />
+    </svg>
   );
 }
 

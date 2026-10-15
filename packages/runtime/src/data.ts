@@ -96,7 +96,8 @@ function coerceObject(fields: readonly CField[], input: Record<string, unknown>,
   for (const [k, raw] of Object.entries(input)) {
     const f = byKey.get(k) ?? fields.find((x) => x.id === k);
     if (!f) {
-      if (k === "id") continue;
+      // Row ids keep lines stable across edits; handled by lineId().
+      if (k === "id" || k === "_line") continue;
       issues.push({ path: [...path, k], message: `Unknown field "${k}".` });
       continue;
     }

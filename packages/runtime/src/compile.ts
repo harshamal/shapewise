@@ -124,6 +124,8 @@ export function compile(bp: Blueprint): Compiled {
   if (hit) return hit;
   const r = new Resolved(bp);
   const targets = new Map<string, CTarget>();
+  /** A field pointing at a switched-off record type (price list without the extension) isn't shown or accepted. */
+  const live = (f: { type: string; to?: string }) => !(f.type === "ref" && f.to && f.to in CORE_RECORDS && !r.recordEnabled(f.to as CoreRecordKey));
 
   /* core records whose submodule is on */
   for (const [record, rec] of Object.entries(CORE_RECORDS) as [CoreRecordKey, (typeof CORE_RECORDS)[CoreRecordKey]][]) {
@@ -141,13 +143,13 @@ export function compile(bp: Blueprint): Compiled {
       submodule: sub,
       module: SUBMODULE_BY_KEY.get(sub)!.module,
       titleField: titleFieldOf(record),
-      fields: [...rec.fields.map(coreField), ...custom.filter((c) => c.part === "header").map((c) => customField(c.field))],
+      fields: [...rec.fields.filter(live).map(coreField), ...custom.filter((c) => c.part === "header").map((c) => customField(c.field))],
       lines: rec.lines
-        ? { key: "lines", label: rec.lines.label, fields: [...rec.lines.fields.map(coreField), ...custom.filter((c) => c.part === "line").map((c) => customField(c.field))] }
+        ? { key: "lines", label: rec.lines.label, fields: [...rec.lines.fields.filter(live).map(coreField), ...custom.filter((c) => c.part === "line").map((c) => customField(c.field))] }
         : undefined,
       children: (rec.children ?? [])
         .filter((c) => !c.setting || prod[c.setting])
-        .map((c) => ({ key: c.key, label: c.label, fields: c.fields.map(coreField) })),
+        .map((c) => ({ key: c.key, label: c.label, fields: c.fields.filter(live).map(coreField) })),
       states: rec.lifecycle?.states.map((s) => ({ ...s })) ?? [],
       initial: rec.lifecycle?.initial,
       actions: (rec.lifecycle?.actions ?? []).map((a) => ({

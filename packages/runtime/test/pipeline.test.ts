@@ -65,6 +65,14 @@ describe("create and validate", () => {
     expect(r.status === "error" && r.error.issues!.map((i) => i.path.join("."))).toEqual(["customer", "lines.0.item"]);
   });
 
+  it("keeps line ids from forms stable across edits", async () => {
+    const { customer, item } = await basics();
+    const id = await okId(run({ type: "record.create", target: "sales_order", data: { customer, date: "2026-10-16", lines: [{ _line: "", item, quantity: 1, unit_price: 1 }] } }));
+    const line = ((await get("sales_order", id))!.data.lines as { _line: string }[])[0]!._line;
+    await okId(run({ type: "record.update", target: "sales_order", recordId: id, patch: { lines: [{ _line: line, item, quantity: 2, unit_price: 1 }] } }));
+    expect(((await get("sales_order", id))!.data.lines as { _line: string; quantity: number }[])[0]).toMatchObject({ _line: line, quantity: 2 });
+  });
+
   it("works out line amounts, tax and totals in minor units", async () => {
     const { customer, item, vat } = await basics();
     const id = await okId(run({ type: "record.create", target: "sales_order", data: { customer, date: "2026-10-16", lines: [{ item, quantity: "1,000", unit_price: "49.75", discount_pct: 10, tax_code: vat }] } }));
@@ -128,6 +136,13 @@ describe("lifecycle actions, numbering and approvals", () => {
     // Owner posts are held by the journal approval policy first; approve to reach the engine check.
     const decided = r.status === "pending_approval" ? await run({ type: "approval.decide", approvalId: r.approvalId, decision: "approve" }) : r;
     expect(decided.status === "error" && decided.error.message).toBe("Debits (100.00) must equal credits (90.00) across at least two lines.");
+  });
+
+  it("sets an invoice's due date from the customer's payment terms", async () => {
+    const { item } = await basics();
+    const c14 = await okId(run({ type: "record.create", target: "customer", data: { name: "Fast payer", payment_terms_days: 14 } }));
+    const inv = await okId(run({ type: "record.create", target: "invoice", data: { customer: c14, date: "2026-10-16", lines: [{ item, quantity: 1, unit_price: 1 }] } }));
+    expect((await get("invoice", inv))!.data.due_date).toBe("2026-10-30");
   });
 
   it("says plainly that postings aren't made yet", async () => {
