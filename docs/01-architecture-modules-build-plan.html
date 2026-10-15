@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shapewise build plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #14181f;
+    --muted: #5d6573;
+    --faint: #8a919c;
+    --line: #dfe2e7;
+    --soft: #f4f5f7;
+    --accent: #1f5f8b;
+    --accent-soft: #e8f0f6;
+    --fixed: #f3ede4;
+    --fixed-ink: #6b4b1f;
+    --dyn: #e7f2ec;
+    --dyn-ink: #1d5a3c;
+    --surface: #ffffff;
+  }
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  * { box-sizing: border-box; }
+  html, body { background: var(--surface); }
+  body {
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    font-size: 10pt;
+    line-height: 1.5;
+    margin: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    font-feature-settings: "tnum" 1;
+  }
+  .page { max-width: 820px; margin: 0 auto; padding: 0 16px; }
+  h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  h2 {
+    font-size: 16pt; margin: 0 0 4mm; padding-top: 2mm;
+    break-before: page; page-break-before: always;
+  }
+  h2 .num { color: var(--faint); font-weight: 500; margin-right: 6px; }
+  h3 { font-size: 11.5pt; margin: 6mm 0 2mm; }
+  h4 { font-size: 10pt; margin: 4mm 0 1.5mm; color: var(--ink); }
+  p { margin: 0 0 2.5mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 5mm; }
+  li { margin: 0 0 1mm; }
+  .lead { font-size: 10.5pt; color: var(--muted); max-width: 150mm; }
+  .muted { color: var(--muted); }
+  code, .mono { font-family: "JetBrains Mono", Consolas, monospace; font-size: 8.6pt; }
+  code { background: var(--soft); padding: 0 3px; border-radius: 3px; }
+  pre {
+    font-family: "JetBrains Mono", Consolas, monospace; font-size: 8.3pt; line-height: 1.45;
+    background: var(--soft); border: 1px solid var(--line); border-radius: 6px;
+    padding: 3mm 4mm; margin: 0 0 3.5mm; white-space: pre; overflow: hidden;
+    break-inside: avoid;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9pt; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th {
+    text-align: left; font-weight: 500; color: var(--muted); font-size: 8.4pt;
+    border-bottom: 1px solid var(--ink); padding: 1.6mm 2mm 1.4mm 0;
+  }
+  td { border-bottom: 1px solid var(--line); padding: 1.6mm 2mm 1.6mm 0; vertical-align: top; }
+  td:first-child { font-weight: 500; }
+  td.n, th.n { text-align: right; }
+  .pill {
+    display: inline-block; font-size: 7.6pt; font-weight: 500; padding: 0.2mm 1.6mm;
+    border-radius: 10px; white-space: nowrap;
+  }
+  .p { background: var(--accent-soft); color: var(--accent); }
+  .r { background: var(--soft); color: var(--muted); }
+  .fx { background: var(--fixed); color: var(--fixed-ink); }
+  .dy { background: var(--dyn); color: var(--dyn-ink); }
+  .note {
+    border-left: 2px solid var(--accent); background: var(--accent-soft);
+    padding: 2.5mm 4mm; margin: 0 0 4mm; border-radius: 0 4px 4px 0; break-inside: avoid;
+  }
+  .note strong { font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-bottom: 4mm; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: 3mm 4mm; break-inside: avoid; }
+  .card h4 { margin-top: 0; }
+
+  /* Layer diagram */
+  .layers { margin: 0 0 5mm; break-inside: avoid; }
+  .layer { border: 1px solid var(--line); border-radius: 6px; padding: 2.4mm 4mm; margin-bottom: 1.6mm; display: grid; grid-template-columns: 38mm 1fr; gap: 4mm; align-items: center; }
+  .layer .ln { font-weight: 600; font-size: 9pt; }
+  .layer .lc { font-size: 8.8pt; color: var(--muted); }
+  .layer.fixed { background: var(--fixed); border-color: #e6dccb; }
+  .layer.fixed .ln { color: var(--fixed-ink); }
+  .layer.dyn { background: var(--dyn); border-color: #cfe5d8; }
+  .layer.dyn .ln { color: var(--dyn-ink); }
+  .layer.acc { background: var(--accent-soft); border-color: #cfdfeb; }
+  .layer.acc .ln { color: var(--accent); }
+
+  /* Cover */
+  .cover { height: 255mm; display: flex; flex-direction: column; justify-content: space-between; padding-top: 30mm; }
+  .cover .eyebrow { font-size: 9pt; color: var(--muted); letter-spacing: 0.02em; }
+  .cover h1 { font-size: 34pt; letter-spacing: -0.02em; margin: 4mm 0 4mm; }
+  .cover .sub { font-size: 14pt; color: var(--muted); max-width: 140mm; line-height: 1.35; }
+  .cover .meta { border-top: 1px solid var(--line); padding-top: 4mm; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; font-size: 8.8pt; }
+  .cover .meta div span { display: block; color: var(--faint); font-size: 8pt; margin-bottom: 0.5mm; }
+  .toc { columns: 2; column-gap: 10mm; font-size: 9.6pt; margin-top: 8mm; }
+  .toc div { break-inside: avoid; padding: 1mm 0; border-bottom: 1px solid var(--line); }
+  .toc span { color: var(--faint); display: inline-block; width: 7mm; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: 1.5mm; align-items: center; margin: 0 0 4mm; font-size: 8.6pt; break-inside: avoid; }
+  .flow .s { border: 1px solid var(--line); border-radius: 4px; padding: 1mm 2.4mm; background: var(--surface); }
+  .flow .a { color: var(--faint); }
+  .day { break-inside: avoid; }
+
+  @media screen {
+    body { padding: 24px 0 64px; background: var(--soft); }
+    .page { background: var(--surface); padding: 40px 48px; border: 1px solid var(--line); }
+    h2 { margin-top: 18mm; border-top: 1px solid var(--line); padding-top: 8mm; }
+  }
+  @media (max-width: 640px) {
+    .page { padding: 20px 16px; }
+    .grid2, .cover .meta { grid-template-columns: 1fr; }
+    .layer { grid-template-columns: 1fr; }
+    .toc { columns: 1; }
+    pre { overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ============================== COVER ============================== -->
+<section class="cover">
+  <div>
+    <div class="eyebrow">SYNCONIC (Pvt) Ltd · Google AI Builder Cup 2026 · Theme: Manufacturing</div>
+    <h1>Shapewise</h1>
+    <div class="sub">Architecture, modules and build plan for a manufacturing business system that shapes itself around each factory, changes when you ask, and can be run by people or AI agents.</div>
+    <div class="toc">
+      <div><span>1</span>Product and scope</div>
+      <div><span>2</span>Design principles</div>
+      <div><span>3</span>System architecture</div>
+      <div><span>4</span>The layered blueprint</div>
+      <div><span>5</span>Command pipeline</div>
+      <div><span>6</span>Data architecture</div>
+      <div><span>7</span>Approval engine</div>
+      <div><span>8</span>AI architecture</div>
+      <div><span>9</span>MCP design</div>
+      <div><span>10</span>Module catalogue</div>
+      <div><span>11</span>Build order</div>
+      <div><span>12</span>Three-day schedule</div>
+      <div><span>13</span>Evaluation and cut list</div>
+      <div><span>14</span>Cup compliance</div>
+      <div><span>15</span>Risks and open decisions</div>
+    </div>
+  </div>
+  <div class="meta">
+    <div><span>Version</span>1.0</div>
+    <div><span>Date</span>15 October 2026</div>
+    <div><span>Stack</span>Next.js · Firebase · Cloud Run</div>
+    <div><span>AI</span>Gemini · Gemma · ADK · MCP</div>
+  </div>
+</section>
+
+<!-- ============================== 1 ============================== -->
+<h2><span class="num">1</span>Product and scope</h2>
+<p class="lead">Shapewise is a business system for small and medium manufacturers. The owner describes the factory and uploads what they already use: spreadsheets, photographed job cards, QC sheets and invoices. Shapewise becomes a working system for that factory, covering sales, purchasing, inventory, production and accounting, with their data already inside it.</p>
+
+<h3>What it does</h3>
+<table>
+  <thead><tr><th style="width:28%">Capability</th><th>What the owner experiences</th></tr></thead>
+  <tbody>
+    <tr><td>Build from description and files</td><td>An interview of up to 8 questions plus file uploads produces a full system in about a minute.</td></tr>
+    <tr><td>Run the factory</td><td>Sales orders, purchase orders, goods receipts, production jobs by stage, QC, stock, invoices, payments, and the books.</td></tr>
+    <tr><td>Change by asking</td><td>"Add a dyeing stage", "POs over 500k need my approval". The change is previewed, applied without losing data, and can be undone.</td></tr>
+    <tr><td>Insights and recommendations</td><td>What to produce this week, what to reorder, where scrap and defects come from (by machine, shift, operator).</td></tr>
+    <tr><td>Delegate to AI agents</td><td>Every factory gets its own MCP server. Agents operate within roles, and risky actions wait for approval.</td></tr>
+  </tbody>
+</table>
+
+<h3>Dynamic for any manufacturer</h3>
+<p>The engines know manufacturing in general. The blueprint knows the specific industry. The same runtime serves every column below with no industry code.</p>
+<table>
+  <thead><tr><th></th><th>Plastics moulder</th><th>Garment unit</th><th>Food processor</th><th>Furniture workshop</th></tr></thead>
+  <tbody>
+    <tr><td>Stages</td><td>Mixing, moulding, trimming, packing</td><td>Cutting, sewing, finishing, packing</td><td>Cleaning, cooking, filling, sealing</td><td>Cutting, joinery, sanding, polishing</td></tr>
+    <tr><td>Mode</td><td>Batch to stock</td><td>Make to order, size grid</td><td>Batch, lots, expiry</td><td>Job shop</td></tr>
+    <tr><td>Specs</td><td>Resin grade, colour, weight</td><td>Style, size, fabric</td><td>Recipe, shelf life, allergens</td><td>Wood, dimensions, finish</td></tr>
+    <tr><td>QC</td><td>Weight tolerance, flash</td><td>Stitch count, measurements</td><td>Temperature, pH, seal</td><td>Joint strength, finish</td></tr>
+    <tr><td>Resources</td><td>Machines, moulds</td><td>Lines, operators</td><td>Vats, ovens</td><td>Craftsmen, tools</td></tr>
+    <tr><td>Key metric</td><td>Scrap % by machine</td><td>Pieces per operator-hour</td><td>Yield %, near-expiry</td><td>Jobs late vs promised</td></tr>
+  </tbody>
+</table>
+
+<h3>Prototype scope</h3>
+<div class="grid2">
+  <div class="card">
+    <h4>In the 3-day prototype</h4>
+    <ul>
+      <li>Onboarding interview, file upload (XLSX, CSV, Sheets, photos)</li>
+      <li>Blueprint generation with validation and repair</li>
+      <li>Sales: order, delivery, invoice, receipt</li>
+      <li>Purchasing: PO, goods receipt, bill, payment</li>
+      <li>Inventory with locations, lots optional</li>
+      <li>Production: single-level BOM, stages, QC, outputs, scrap</li>
+      <li>Accounting: automatic postings, AR, AP, P&amp;L, stock value</li>
+      <li>Change by conversation with preview and undo</li>
+      <li>Dynamic approvals, audit log</li>
+      <li>Assistant, insights agent, per-business MCP</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Roadmap (deck only)</h4>
+    <ul>
+      <li>Quotations, partial deliveries, returns</li>
+      <li>Multi-level BOM, MRP, capacity planning</li>
+      <li>Labour and overhead costing, FIFO valuation</li>
+      <li>Bank reconciliation, full tax packs per country</li>
+      <li>Voice onboarding with Gemini Live</li>
+      <li>Machine maintenance pack, IoT counters</li>
+      <li>Mobile shop-floor app, offline mode</li>
+      <li>OAuth MCP, per-tool scopes, usage billing</li>
+      <li>Industry pack marketplace for partners</li>
+      <li>Self-hosted Gemma option for regulated tenants</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================== 2 ============================== -->
+<h2><span class="num">2</span>Design principles</h2>
+<table>
+  <thead><tr><th style="width:32%">Principle</th><th>What it means in the build</th></tr></thead>
+  <tbody>
+    <tr><td>1. Never generate what must never be wrong</td><td>Money, stock, numbering, permissions, approvals and audit live in fixed, tested engines. AI can never change how they count.</td></tr>
+    <tr><td>2. Configuration, not code</td><td>AI produces a validated blueprint (JSON). One runtime executes every blueprint. No generated code anywhere.</td></tr>
+    <tr><td>3. One writer</td><td>Every write from the web app, the assistant or an MCP agent goes through one command pipeline. One set of rules for everyone.</td></tr>
+    <tr><td>4. Every change is previewed and reversible</td><td>Blueprint changes become versioned diffs with a data-impact preview and an undo point.</td></tr>
+    <tr><td>5. Humans and agents follow the same rules</td><td>An agent can never do what its role can't, and risky actions always need approval.</td></tr>
+    <tr><td>6. Start from reality</td><td>Learn from the owner's own files, not only from what they remember to say.</td></tr>
+    <tr><td>7. Google-native</td><td>Firebase and Google Cloud for every service; Gemini and Gemma for every AI task.</td></tr>
+    <tr><td>8. Designed, not generated, UI</td><td>One fixed design system for every blueprint: neutral palette, one accent, two font weights, dense tables, no gradients or decoration.</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================== 3 ============================== -->
+<h2><span class="num">3</span>System architecture</h2>
+
+<h3>3.1 Layers</h3>
+<div class="layers">
+  <div class="layer acc"><div class="ln">People and agents</div><div class="lc">Owner · supervisors · store keeper · accountant · built-in assistant · any MCP client (Gemini ADK agent, Claude, ChatGPT)</div></div>
+  <div class="layer acc"><div class="ln">Interfaces</div><div class="lc">Web app (generated screens) · assistant panel · change studio · MCP server (generated tools)</div></div>
+  <div class="layer"><div class="ln">Command pipeline</div><div class="lc">Authorise → approval policy → engine → computed fields → audit → outbox, in one Firestore transaction</div></div>
+  <div class="layer dyn"><div class="ln">Blueprint (AI-shaped)</div><div class="lc">Base manufacturing blueprint + industry pack + this factory's customisations: records, fields, stages, workflows, rules, approvals, roles, screens, documents, dashboards</div></div>
+  <div class="layer fixed"><div class="ln">Core engines (fixed)</div><div class="lc">Items and units · inventory · BOM and production · sales · purchasing · ledger · numbering and documents · permissions · approvals · audit</div></div>
+  <div class="layer"><div class="ln">Google platform</div><div class="lc">Firestore · Firebase Auth · Cloud Storage · App Hosting · Cloud Run · Cloud Tasks · Cloud Functions · Vertex AI · Secret Manager</div></div>
+</div>
+
+<h3>3.2 Services</h3>
+<table>
+  <thead><tr><th style="width:16%">Service</th><th style="width:44%">Responsibility</th><th>Runs on</th></tr></thead>
+  <tbody>
+    <tr><td>web</td><td>All screens, server actions calling the runtime, auth session, file upload, realtime listeners</td><td>Next.js 16 on Firebase App Hosting (Cloud Run + CDN)</td></tr>
+    <tr><td>agents</td><td>Architect agent (interview, files, blueprint, changes), operator assistant, insights agent</td><td>ADK (TypeScript) on Cloud Run</td></tr>
+    <tr><td>mcp</td><td><code>/mcp/{tenant}</code> Streamable HTTP endpoint, token auth, role-filtered tools, rate limits</td><td>Cloud Run</td></tr>
+    <tr><td>worker</td><td>Imports, backfills, PDFs, embeddings, outbox relay, nightly integrity checks</td><td>Cloud Run (Cloud Tasks targets) + Cloud Functions 2nd gen (Firestore triggers)</td></tr>
+    <tr><td>gemma</td><td>Gemma 4 for bulk column typing and value cleaning during import</td><td>Cloud Run with GPU (fallback: Vertex AI Model Garden, then Flash-Lite)</td></tr>
+  </tbody>
+</table>
+<p class="muted">All services share one TypeScript monorepo and one region (e.g. <code>asia-south1</code>). Each has its own least-privilege service account.</p>
+
+<h3>3.3 Repository</h3>
+<pre>apps/
+  web/          Next.js 16: landing, onboarding, workspace, change studio, approvals, agents, settings
+  agents/       ADK agents: architect, operator, insights
+  mcp/          MCP server
+  worker/       jobs and Firestore triggers
+packages/
+  blueprint/    schema, catalogues, expression language, layers + merge, validator, compiler, diff, migration planner
+  engines/      items, inventory, production, sales, purchasing, ledger, numbering, documents, permissions, approvals, audit
+  runtime/      command pipeline, record service, query planner, rollups, outbox, compiled-blueprint cache
+  tools/        blueprint → tool manifest (JSON Schema) shared by MCP and assistant
+  ai/           Gen AI client (Vertex), model router, structured output + repair, prompts, data wrapping
+  db/           Firestore paths, converters, tenant transaction helper, Security Rules, index catalogue
+  ui/           design system, data table, form renderer, kanban, calendar, charts, chat, diff viewer
+  blueprints/   base manufacturing blueprint, industry packs, eval fixtures
+  config/       tsconfig, eslint, tailwind preset</pre>
+<p>Dependencies point one way: <code>apps → runtime, tools, ai → engines, blueprint → db</code>. Engines and blueprint import no framework or vendor SDK, so they are unit tested in isolation.</p>
+
+<h3>3.4 Key flows</h3>
+<h4>Onboarding</h4>
+<div class="flow"><span class="s">Sign in</span><span class="a">→</span><span class="s">Interview + uploads</span><span class="a">→</span><span class="s">Files read (Flash, Gemma)</span><span class="a">→</span><span class="s">Business summary confirmed</span><span class="a">→</span><span class="s">Pick industry pack</span><span class="a">→</span><span class="s">Customisations generated (Pro)</span><span class="a">→</span><span class="s">Validate + repair</span><span class="a">→</span><span class="s">Owner reviews</span><span class="a">→</span><span class="s">Import data</span><span class="a">→</span><span class="s">MCP live</span></div>
+<h4>Change by conversation</h4>
+<div class="flow"><span class="s">Request (chat or MCP)</span><span class="a">→</span><span class="s">Change planner drafts overlay diff</span><span class="a">→</span><span class="s">Merge + validate</span><span class="a">→</span><span class="s">Migration planner: impact + reversibility</span><span class="a">→</span><span class="s">Preview</span><span class="a">→</span><span class="s">Owner approves</span><span class="a">→</span><span class="s">Backfill job if needed</span><span class="a">→</span><span class="s">New version active</span><span class="a">→</span><span class="s">Screens + tools update</span></div>
+<h4>Agent action through MCP</h4>
+<div class="flow"><span class="s">Token → tenant + role</span><span class="a">→</span><span class="s">List allowed tools</span><span class="a">→</span><span class="s">Call tool</span><span class="a">→</span><span class="s">Command pipeline</span><span class="a">→</span><span class="s">Done, or pending_approval</span><span class="a">→</span><span class="s">Audit with client name</span></div>
+<h4>Production run</h4>
+<div class="flow"><span class="s">Sales order (MTO) or plan (MTS)</span><span class="a">→</span><span class="s">Production job from BOM</span><span class="a">→</span><span class="s">Issue materials</span><span class="a">→</span><span class="s">Stages + QC</span><span class="a">→</span><span class="s">Receive outputs, co-products, scrap</span><span class="a">→</span><span class="s">Close: variance + cost</span><span class="a">→</span><span class="s">Deliver + invoice</span></div>
+
+<!-- ============================== 4 ============================== -->
+<h2><span class="num">4</span>The layered blueprint</h2>
+<p class="lead">The blueprint is the single description of a factory's shape. It is the only thing AI is allowed to write. Each factory's live blueprint is built from three layers.</p>
+
+<div class="layers">
+  <div class="layer fixed"><div class="ln">1 · Base blueprint</div><div class="lc">Written and tested by us. Sales, purchasing, inventory, production, accounting, approvals, standard roles, default screens and dashboards.</div></div>
+  <div class="layer dyn"><div class="ln">2 · Industry pack</div><div class="lc">Plastics, garments, food, furniture… Stages, specs, QC checklists, units, metrics. Picked by AI or generated for a new industry.</div></div>
+  <div class="layer acc"><div class="ln">3 · Customisations</div><div class="lc">This factory's own changes, from onboarding and every later request. Stored as a list of overlay operations, not a copy.</div></div>
+</div>
+
+<h3>4.1 Merge and versioning</h3>
+<ul>
+  <li>Everything in the blueprint has a <strong>stable ID</strong> (<code>fld_7k2</code>, <code>ent_job</code>, <code>stg_dye</code>). Keys and labels can change; IDs never do.</li>
+  <li>Packs and customisations are <strong>overlay operations</strong>: <code>add</code>, <code>update</code>, <code>remove</code>, <code>disable</code>, <code>move</code>, each targeting an ID.</li>
+  <li><code>live = merge(base@v, pack@v, overlays)</code>, then validated and compiled. Every applied change creates an immutable version with author, reason and undo pointer.</li>
+  <li>When we improve the base or a pack, factories get the improvement on their next merge. If an overlay touches something the base removed, the change is flagged for review rather than applied silently.</li>
+</ul>
+
+<h3>4.2 What can change, and what can't</h3>
+<table>
+  <thead><tr><th style="width:50%"><span class="pill dy">Dynamic</span> add, edit, remove or turn off</th><th><span class="pill fx">Fixed</span> enforced by engines</th></tr></thead>
+  <tbody>
+    <tr><td>Fields on any record, including computed fields</td><td>How a posted document affects the ledger and stock</td></tr>
+    <tr><td>Modules (add "Machine maintenance", turn off "Quotations")</td><td>Double entry, gap-free numbering, tax maths</td></tr>
+    <tr><td>Submodules and steps (skip GRNs, add a dyeing stage)</td><td>Posted records are reversed, never edited</td></tr>
+    <tr><td>Workflows: states, transitions, required fields per step</td><td>Accounting can be simplified in the UI, not turned off</td></tr>
+    <tr><td>Approval flows, conditions, approvers, order of steps</td><td>Safety floors on approvals can be tightened, never loosened</td></tr>
+    <tr><td>Roles, permissions, row-level scopes</td><td>Permission checks can't be skipped by any caller</td></tr>
+    <tr><td>Rules: discounts, validations, alerts, auto-calculations</td><td>Audit log is append only</td></tr>
+    <tr><td>Screens, dashboards, reports, document templates, number formats</td><td>Units, quantities and money stored as exact integers</td></tr>
+  </tbody>
+</table>
+
+<h3>4.3 Blueprint shape (abridged)</h3>
+<pre>{
+  "id": "bp_dpplastics", "version": 12, "base": "manufacturing@3", "pack": "plastics@2",
+  "business": { "name": "DP Plastics", "currency": "LKR", "locale": "en-LK", "timezone": "Asia/Colombo" },
+  "modules": [ { "id": "mod_sales", "binding": "sales", "enabled": true },
+               { "id": "mod_quotes", "binding": "sales.quotation", "enabled": false },
+               { "id": "mod_maint", "label": "Machine maintenance", "entities": ["ent_machine", "ent_service"] } ],
+  "entities": [ { "id": "ent_job", "key": "production_job", "binding": "production.job",
+      "fields": [ { "id": "fld_mould", "key": "mould_no", "type": "ref", "to": "ent_mould", "filterable": true },
+                  { "id": "fld_cav", "key": "cavities", "type": "integer", "min": 1 } ],
+      "stages": [ { "id": "stg_mix", "label": "Mixing" }, { "id": "stg_mould", "label": "Moulding",
+                    "qc": [ { "id": "qc_w", "label": "Weight", "type": "number", "tolerance": "±2%" } ] } ] } ],
+  "rules": [ { "id": "rl_1", "when": "sales_order.customer.order_count >= 5", "then": { "discount_percent": 5 } } ],
+  "approvals": [ { "id": "ap_po", "on": "purchase_order.submit", "when": "total > 500000",
+                   "steps": [ { "role": "production_manager" }, { "role": "owner" } ] } ],
+  "roles": [ { "id": "rl_sup", "key": "supervisor", "can": ["production_job.*:own_line"] } ],
+  "views": [ { "entity": "ent_job", "type": "kanban", "by": "stage" } ],
+  "dashboard": [ "scrap_pct_by_machine", "jobs_late", "stock_below_reorder", "receivables_overdue" ]
+}</pre>
+
+<h3>4.4 Validator rules</h3>
+<ul>
+  <li>IDs and keys unique; references point to existing entities; only catalogue field types and expression functions.</li>
+  <li>Entities touching money or stock must bind to an engine and can't redefine its posting behaviour.</li>
+  <li>Workflows reachable and terminating; transitions name existing states; required fields exist.</li>
+  <li>Approval and permission rules can't drop below engine safety floors.</li>
+  <li>Expressions are parsed and type-checked by our own safe language; no arbitrary code.</li>
+  <li>Every error carries a JSON path and a fix hint, which the repair loop feeds back to Gemini.</li>
+</ul>
+
+<!-- ============================== 5 ============================== -->
+<h2><span class="num">5</span>Command pipeline</h2>
+<p class="lead">The single writer for everything. This is what keeps the system consistent no matter how many surfaces or agents are added.</p>
+<pre>Web UI ──────┐
+Assistant ───┼──▶ execute(command, actor)
+MCP agent ───┘
+   1  resolve tenant + actor (uid or token) + channel (web | assistant | mcp)
+   2  load compiled blueprint (cached by tenant + version)
+   3  validate input against compiled schema
+   4  authorise: role permission + row scope
+   5  approval policy: matches? → write approval request, return pending_approval
+   6  idempotency key check
+   7  Firestore transaction:
+        read affected docs, check versions
+        engine logic (stock, production, ledger, numbering)
+        update computed dependents + rollups
+        write audit entry + outbox event
+   8  commit → return result (or retry on contention)</pre>
+<table>
+  <thead><tr><th style="width:26%">Command kind</th><th>Examples</th></tr></thead>
+  <tbody>
+    <tr><td>record.create / update</td><td>Create customer, update a job's mould number</td></tr>
+    <tr><td>record.transition</td><td>Move a job from moulding to trimming (checks required fields and QC)</td></tr>
+    <tr><td>engine action</td><td>post_invoice, receive_goods, issue_materials, receive_output, record_payment, adjust_stock</td></tr>
+    <tr><td>approval.decide</td><td>Approve or reject; on approve, the original command is re-validated and executed</td></tr>
+    <tr><td>blueprint.apply</td><td>Apply an approved change; creates a version and possibly a backfill job</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================== 6 ============================== -->
+<h2><span class="num">6</span>Data architecture</h2>
+<h3>6.1 Firestore layout</h3>
+<pre>tenants/{tid}                         profile, activeBlueprintVersion
+  members/{uid}                       roleKey, scopes
+  blueprints/{version}                merged + compiled blueprint (immutable)
+  overlays/{id}                       customisation operations
+  changes/{id}                        request, diff, preview, status, undo pointer
+  records/{rid}                       entityKey, data{fieldId: value}, idx{slots}, status, stage,
+                                      version, links[], searchTokens[], embedding
+  items/{id}                          materials, products, units, BOM refs
+  boms/{id}                           inputs, outputs, co-products, scrap %, version
+  stockLevels/{item_location_lot}     on-hand projection
+  stockMoves/{id}                     append only
+  journal/{id}                        balanced entry with lines (append only)
+  accounts/{id}                       chart of accounts
+  sequences/{docKey}                  gap-free counters
+  approvals/{id}                      parked command, steps, decisions
+  audit/{id}                          append only
+  rollups/{metric_yyyymmdd}           dashboard aggregates
+  jobs/{id}                           import / generation / backfill progress
+  outbox/{id}                         events for the worker
+mcpTokens/{hash}                      tenantId, roleKey, label, revoked</pre>
+
+<h3>6.2 Staying fast with dynamic fields</h3>
+<ul>
+  <li><strong>Stable field IDs</strong>: renames are metadata-only, with no data rewrite.</li>
+  <li><strong>Typed index slots</strong>: filterable or sortable fields are assigned to <code>idx.s1–s8</code>, <code>n1–n6</code>, <code>d1–d6</code>, <code>r1–r4</code>. One fixed set of composite indexes serves every tenant and blueprint, so we never hit Firestore's index limit.</li>
+  <li><strong>Computed fields materialised on write</strong>, using the compiler's dependency graph. No read-time fan-out.</li>
+  <li><strong>Dashboards read rollup documents</strong>, never scan records. Count and sum aggregation queries cover ad-hoc questions.</li>
+  <li><strong>Search</strong>: prefix tokens for instant lookup; Firestore vector search with Gemini embeddings for fuzzy matching.</li>
+</ul>
+
+<h3>6.3 Isolation and correctness</h3>
+<table>
+  <thead><tr><th style="width:34%">Guarantee</th><th>How</th></tr></thead>
+  <tbody>
+    <tr><td>Tenants never see each other</td><td>Path isolation under <code>tenants/{tid}</code>; Security Rules on custom claims; clients read only, never write; server builds every path through one tenant helper</td></tr>
+    <tr><td>Debits equal credits</td><td>Ledger engine is the only writer; refuses unbalanced entries; lines embedded so an entry is atomic</td></tr>
+    <tr><td>Postings immutable</td><td>Rules deny update and delete; corrections are reversing entries</td></tr>
+    <tr><td>Gap-free numbering</td><td>Counter incremented in the same transaction that issues the document</td></tr>
+    <tr><td>Stock matches moves</td><td>Move and level written in one transaction; nightly recompute and alert on drift</td></tr>
+    <tr><td>Exact amounts</td><td>Money in integer minor units; quantities in integer milli-units</td></tr>
+    <tr><td>No lost updates</td><td>Version field checked in every transaction</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================== 7 ============================== -->
+<h2><span class="num">7</span>Approval engine</h2>
+<p class="lead">Approval flows are blueprint data, so any action can have one, defined by the owner in plain words and applied through the change studio.</p>
+<pre>approvals:
+  - on: purchase_order.submit
+    when: total > 500000
+    steps:
+      - role: production_manager
+      - role: owner                       # sequential
+  - on: stock.adjust
+    when: abs(quantity) > 20 or channel == "mcp"
+    steps: [ { any_of: [store_lead, owner] } ]
+  - on: "*.delete"
+    steps: [ { role: owner } ]</pre>
+<table>
+  <thead><tr><th style="width:28%">Feature</th><th>Behaviour</th><th style="width:12%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Triggers</td><td>Any command, record transition or engine action; wildcards</td><td><span class="pill p">Prototype</span></td></tr>
+    <tr><td>Conditions</td><td>Safe expressions on amounts, quantities, parties, actor, channel</td><td><span class="pill p">Prototype</span></td></tr>
+    <tr><td>Steps</td><td>Single, sequential, any-of a role or list</td><td><span class="pill p">Prototype</span></td></tr>
+    <tr><td>Re-check on approve</td><td>The parked command is re-validated against current data before it runs</td><td><span class="pill p">Prototype</span></td></tr>
+    <tr><td>Safety floors</td><td>Engine-defined minimums (refunds, posted-document voids, large stock write-offs)</td><td><span class="pill p">Prototype</span></td></tr>
+    <tr><td>Agent polling</td><td><code>get_approval_status(id)</code> over MCP</td><td><span class="pill p">Prototype</span></td></tr>
+    <tr><td>Delegation, expiry, escalation</td><td>Approver on leave, time-outs, reminders</td><td><span class="pill r">Roadmap</span></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================== 8 ============================== -->
+<h2><span class="num">8</span>AI architecture</h2>
+<h3>8.1 Agents</h3>
+<table>
+  <thead><tr><th style="width:20%">Agent</th><th>Job</th><th style="width:22%">Models</th></tr></thead>
+  <tbody>
+    <tr><td>Architect: interview</td><td>Fixed checklist: products, production style, stages, materials, sales and purchasing flow, people, pain points. Uses files first; at most 8 questions; ends with a summary the owner confirms.</td><td>Gemini Flash</td></tr>
+    <tr><td>Architect: files</td><td>Spreadsheets: header + 50 rows per sheet, column typing, entity and relation inference, implied rules. Photos and PDFs of job cards, QC sheets, invoices: extract the fields they capture. Produces an evidence list.</td><td>Flash (vision), Gemma 4 for column typing</td></tr>
+    <tr><td>Architect: blueprint</td><td>Picks the industry pack, generates customisation overlays with structured output, validator repair loop (3 rounds), then a self-check against the evidence.</td><td>Gemini Pro</td></tr>
+    <tr><td>Change planner</td><td>Turns requests into overlay diffs with a plain-language preview; one clarifying question when ambiguous; refuses engine-breaking changes with a reason.</td><td>Flash, Pro for multi-entity</td></tr>
+    <tr><td>Import mapper</td><td>Column-to-field mapping with confidence, value cleaning, record linking by fuzzy match.</td><td>Flash, Gemma 4, Embedding</td></tr>
+    <tr><td>Operator assistant</td><td>Answers and acts through the generated tools only; numbers always from the database; shows which tools it used.</td><td>Gemini Flash (ADK)</td></tr>
+    <tr><td>Insights</td><td>Production plan from open orders and stock; reorder suggestions from BOM needs and lead times; scrap and defect patterns by machine, shift, operator. Outputs actions that can be applied (draft PO, draft job).</td><td>Gemini Pro + rollup data</td></tr>
+    <tr><td>Demo MCP agent</td><td>An ADK agent with <code>McpToolset</code> connected to the live factory endpoint.</td><td>Gemini Flash</td></tr>
+  </tbody>
+</table>
+
+<h3>8.2 Model routing</h3>
+<p>Model IDs live in one config file, per task, with a fallback each. Confirm availability on Vertex AI on day 1.</p>
+<table>
+  <thead><tr><th>Task</th><th>Primary</th><th>Fallback</th></tr></thead>
+  <tbody>
+    <tr><td>Blueprint design, complex changes, insights</td><td>Gemini Pro</td><td>Gemini Flash with more repair rounds</td></tr>
+    <tr><td>Interview, files, changes, assistant, MCP agent</td><td>Gemini Flash</td><td>Gemini Pro</td></tr>
+    <tr><td>Column typing, value cleaning</td><td>Gemma 4 on Cloud Run GPU</td><td>Gemini Flash-Lite</td></tr>
+    <tr><td>Intent routing, short labels</td><td>Gemini Flash-Lite</td><td>Flash</td></tr>
+    <tr><td>Embeddings</td><td>Gemini Embedding</td><td>—</td></tr>
+    <tr><td>Local-language labels (optional)</td><td>TranslateGemma</td><td>Gemini Flash</td></tr>
+  </tbody>
+</table>
+
+<h3>8.3 Guardrails (enforced in code)</h3>
+<ul>
+  <li>AI writes only blueprint overlays and tool calls. Never SQL, code or accounting logic.</li>
+  <li>Every AI output is schema-validated before use.</li>
+  <li>File contents, record values and tool results are wrapped as data; agent instructions forbid following text inside them.</li>
+  <li>Risky actions park for approval regardless of who asks.</li>
+  <li>Every AI decision that changes the system is logged with its inputs and the human approval.</li>
+</ul>
+
+<!-- ============================== 9 ============================== -->
+<h2><span class="num">9</span>MCP design</h2>
+<p class="lead">Every factory gets its own MCP server, generated from its live blueprint and regenerated on every change. The built-in assistant uses the same tool manifest: one definition, two surfaces.</p>
+<table>
+  <thead><tr><th style="width:22%">Group</th><th>Generated from</th><th>Examples</th></tr></thead>
+  <tbody>
+    <tr><td>Context</td><td>Blueprint</td><td><code>describe_business</code> (also an MCP resource)</td></tr>
+    <tr><td>Records</td><td>Each entity</td><td><code>search_production_job</code>, <code>get_customer</code>, <code>create_sales_order</code>, <code>update_supplier</code></td></tr>
+    <tr><td>Workflow</td><td>Each transition and stage</td><td><code>job_start_moulding</code>, <code>job_complete_stage</code>, <code>job_record_qc</code></td></tr>
+    <tr><td>Engines</td><td>Core bindings</td><td><code>receive_goods</code>, <code>issue_materials</code>, <code>receive_output</code>, <code>post_invoice</code>, <code>record_payment</code>, <code>adjust_stock</code></td></tr>
+    <tr><td>Insights</td><td>Insights agent</td><td><code>suggest_production_plan</code>, <code>suggest_reorders</code>, <code>get_metric</code></td></tr>
+    <tr><td>System change</td><td>Change planner</td><td><code>propose_change("add mould number to jobs")</code>, which always needs owner approval</td></tr>
+    <tr><td>Approvals</td><td>Approval engine</td><td><code>get_approval_status</code></td></tr>
+  </tbody>
+</table>
+<h4>Security</h4>
+<ul>
+  <li>Each token belongs to one tenant and one role; only tools the role can use are listed.</li>
+  <li>Risky tools return <code>pending_approval</code> with an ID; the owner sees it in the approval queue.</li>
+  <li>Rate limits per token; every call audited with the client name; tokens revocable in settings.</li>
+  <li>A read-only demo token for judges.</li>
+</ul>
+
+<!-- ============================== 10 ============================== -->
+<h2><span class="num">10</span>Module catalogue</h2>
+<p class="lead">Every module and submodule, with its depth in the prototype. <span class="pill p">P</span> = prototype, <span class="pill r">R</span> = roadmap.</p>
+
+<h3>M0 · Platform and delivery</h3>
+<table>
+  <thead><tr><th style="width:28%">Submodule</th><th>Responsibility</th><th style="width:8%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Monorepo and tooling</td><td>pnpm workspaces, Turborepo, TypeScript strict, ESLint, Vitest</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Firebase project</td><td>Auth, Firestore, Storage, App Hosting, Functions, Blaze plan, region</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Google Cloud</td><td>Vertex AI, Cloud Run, Cloud Tasks, Secret Manager, GPU quota request, service accounts</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Local environment</td><td>Firebase Emulator Suite, seed scripts, <code>.env</code> templates</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Deploy pipeline</td><td>One command per service; staging and production</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>CI</td><td>Typecheck, unit tests, rules tests on every push</td><td><span class="pill r">R</span></td></tr>
+    <tr><td>Observability</td><td>Cloud Logging, Trace, Error Reporting, AI token metering per tenant</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M1 · Data layer <span class="muted mono">packages/db</span></h3>
+<table>
+  <thead><tr><th style="width:28%">Submodule</th><th>Responsibility</th><th style="width:8%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Paths and converters</td><td>Typed path builders, Firestore converters per collection</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Tenant transaction helper</td><td><code>withTenant(tid, tx =&gt; …)</code>, retries, version checks</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Security Rules</td><td>Read by membership and role scope; deny all client writes; Storage rules</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Index catalogue</td><td>Fixed composite indexes over typed slots; vector index</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Rules tests</td><td>Emulator tests for cross-tenant and write denial</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M2 · Blueprint system <span class="muted mono">packages/blueprint</span></h3>
+<table>
+  <thead><tr><th style="width:28%">Submodule</th><th>Responsibility</th><th style="width:8%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Schema</td><td>Zod schema for every blueprint part; JSON Schema export for Gemini structured output</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Field-type catalogue</td><td>text, longtext, integer, decimal, money, quantity+unit, date, datetime, boolean, select, multiselect, ref, lines, file, image, phone, email, computed</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Binding catalogue</td><td>Engine bindings: sales.*, purchasing.*, inventory.item, production.job, production.bom, ledger.*</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Expression language</td><td>Tokenizer, parser, type-checker, evaluator; functions: count, sum, min, max, if, date maths, abs, round</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Layers and merge</td><td>Overlay operations, merge base + pack + overlays, conflict detection</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Validator</td><td>All rules in §4.4, errors with JSON path and fix hint</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Compiler</td><td>Slot assignment, dependency graph, permission matrix, record validators, approval matchers, tool manifest input</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Diff</td><td>Version-to-version diff in plain operations, for previews and audit</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Migration planner</td><td>Classify metadata-only vs data changes, reversibility, impact counts, backfill plan</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M3 · Base blueprint and industry packs <span class="muted mono">packages/blueprints</span></h3>
+<table>
+  <thead><tr><th style="width:28%">Submodule</th><th>Responsibility</th><th style="width:8%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Base manufacturing blueprint</td><td>Customers, suppliers, items, sales orders, deliveries, invoices, POs, GRNs, bills, payments, production jobs, BOMs, roles, dashboards</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Pack: plastics</td><td>Demo depth, modelled on DP Plastics</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Packs: garments, food, furniture</td><td>Enough to generate and show side by side</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Chart of accounts templates</td><td>Manufacturing COA: raw materials, WIP, finished goods, GRNI, COGS, scrap loss, VAT</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Pack marketplace</td><td>Partners publish packs</td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M4 · Core engines <span class="muted mono">packages/engines</span></h3>
+<h4>M4.1 Items and units</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Items</td><td>Raw material, component, finished good, co-product, by-product, service; reorder level; lead time</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Units</td><td>Any unit, per-item conversions (buy in rolls, use in metres, sell in dozens)</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Variants</td><td>Size and colour matrices for garments</td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+<h4>M4.2 Inventory</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Locations and stages</td><td>Stores, WIP, finished goods, quarantine</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Stock moves</td><td>Receive, issue, transfer, adjust, produce, scrap; append only</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Levels and reservations</td><td>On hand, reserved for orders, available</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Lots and expiry</td><td>Switched on per item by the blueprint</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Valuation</td><td>Weighted average cost</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>FIFO, landed cost, cycle counts</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+<h4>M4.3 BOM and production</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">BOM</td><td>Single level; inputs, main output, co-products, by-products, expected scrap and yield; versioned</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Production job</td><td>From a sales order (MTO) or a plan (MTS); planned quantity; BOM version; stages from the blueprint</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Material issue</td><td>Raw → WIP, actual vs standard</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Stages and QC</td><td>Stage transitions with QC checks from the blueprint; failed QC blocks or flags</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Output and scrap</td><td>WIP → finished goods and co-products; scrap recorded with reason, machine, shift</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Close and costing</td><td>Material cost rolled into outputs; usage variance</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Multi-level BOM, routings with times, labour and overhead, capacity</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+<h4>M4.4 Sales</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Customers</td><td>Credit limit, payment terms, price list</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Sales order</td><td>Lines, reservation or MTO job creation, credit check</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Delivery</td><td>Stock out, COGS posting</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Invoice</td><td>Totals, tax lines, gap-free number, PDF, AR posting</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Receipt</td><td>Payment against invoices, AR settlement</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Quotations, partial deliveries, returns, credit notes</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+<h4>M4.5 Purchasing</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Suppliers</td><td>Items supplied, lead time, terms</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Purchase order</td><td>Lines, approval policy hook</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Goods received note</td><td>Stock in, optional receipt QC, GRNI posting</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Supplier bill</td><td>Match to GRN, AP posting</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Payment</td><td>AP settlement</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Purchase requests, three-way match tolerances, debit notes</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+<h4>M4.6 Accounting</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Ledger</td><td>Balanced journal entries, append only, reversals</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Posting rules</td><td>Fixed rules per engine event (table below)</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Chart of accounts</td><td>From template, editable names and codes</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Manual journals</td><td>Adjustments, with approval</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Receivables and payables</td><td>Open items, ageing</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Reports</td><td>P&amp;L, balance sheet, trial balance, stock valuation</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Tax</td><td>VAT rates as rules with effective dates</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Bank reconciliation, periods and locking, multi-currency, tax filing packs</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+<table>
+  <thead><tr><th style="width:28%">Event</th><th>Debit</th><th>Credit</th></tr></thead>
+  <tbody>
+    <tr><td>Goods received</td><td>Raw materials inventory</td><td>Goods received not invoiced</td></tr>
+    <tr><td>Supplier bill</td><td>GRNI, VAT input</td><td>Accounts payable</td></tr>
+    <tr><td>Supplier payment</td><td>Accounts payable</td><td>Bank / cash</td></tr>
+    <tr><td>Material issue</td><td>Work in progress</td><td>Raw materials inventory</td></tr>
+    <tr><td>Output received</td><td>Finished goods (+ co-products)</td><td>Work in progress</td></tr>
+    <tr><td>Scrap</td><td>Scrap loss</td><td>Work in progress</td></tr>
+    <tr><td>Delivery</td><td>Cost of goods sold</td><td>Finished goods inventory</td></tr>
+    <tr><td>Sales invoice</td><td>Accounts receivable</td><td>Sales, VAT output</td></tr>
+    <tr><td>Customer receipt</td><td>Bank / cash</td><td>Accounts receivable</td></tr>
+  </tbody>
+</table>
+<h4>M4.7 Numbering, documents, permissions, approvals, audit</h4>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Numbering</td><td>Gap-free per document type; formats from the blueprint</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Documents</td><td>Totals, tax lines; PDF for invoice, PO, job card via <code>@react-pdf/renderer</code></td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Permissions</td><td>Role × action × row scope from the compiled matrix</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Approvals</td><td>As §7</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Audit</td><td>Who or which agent, what, when, channel, before and after</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M5 · Runtime <span class="muted mono">packages/runtime</span></h3>
+<table>
+  <thead><tr><th style="width:28%">Submodule</th><th>Responsibility</th><th style="width:8%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Command pipeline</td><td>As §5</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Record service</td><td>Validate, store by field ID, fill slots, links, search tokens</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Computed fields</td><td>Dependency-graph updates in the same transaction</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Rules engine</td><td>Evaluate blueprint rules on create, update, transition</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Query planner</td><td>Filters and sorts → slot queries, pagination, aggregations</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Rollups</td><td>Daily metric documents updated in the command transaction</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Blueprint cache</td><td>Compiled blueprint by tenant + version, in-process</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Outbox</td><td>Events written in-transaction, relayed by the worker</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M6 · Tools <span class="muted mono">packages/tools</span></h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Manifest generator</td><td>Blueprint → tools with JSON Schema inputs and descriptions (§9)</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Role filter</td><td>Hide tools a role can't use</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Executor</td><td>Tool call → command → result or pending_approval</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M7 · AI platform <span class="muted mono">packages/ai</span></h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Gen AI client</td><td><code>@google/genai</code> on Vertex AI; AI Studio key for local</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Model router</td><td>Task → model + fallback, from config</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Structured output + repair</td><td>Schema-constrained calls; validator errors fed back</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Prompt library</td><td>Versioned prompts per task, with examples</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Data wrapping</td><td>Prompt-injection defence for files and tool results</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Gemma client</td><td>Calls the Gemma Cloud Run service, falls back to Flash-Lite</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Metering</td><td>Tokens and cost per tenant and task</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M8 · Agents <span class="muted mono">apps/agents</span></h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Interview agent</td><td>Checklist interview, summary</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>File understanding</td><td>Sheets, photos, PDFs → evidence list</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Blueprint generator</td><td>Pack choice, overlays, repair, self-check</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Change planner</td><td>Diff, preview, clarifying question, refusal</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Operator assistant</td><td>Tools-only answers and actions</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Insights agent</td><td>Production plan, reorders, scrap and defect analysis</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Demo MCP agent</td><td>ADK + McpToolset against the live endpoint</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Voice (Gemini Live), daily brief</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M9 · Import</h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Readers</td><td>XLSX and CSV (SheetJS), Google Sheets (Picker + Sheets API), images and PDFs (Gemini)</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Profiling</td><td>Column statistics and samples</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Mapping proposal</td><td>Column → field with confidence; owner confirms</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Cleaning</td><td>Dates, phones, currency, units (Gemma 4 batch)</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Linking</td><td>Orders to customers, lines to items, by fuzzy match</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Loader</td><td>Cloud Tasks job through the command pipeline, BulkWriter, progress doc</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Import report</td><td>Imported, needs attention, one-click fixes</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Opening balances</td><td>Stock and AR/AP opening entries</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M10 · MCP server <span class="muted mono">apps/mcp</span></h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Transport</td><td>Streamable HTTP per tenant</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Token auth</td><td>Hash lookup, tenant + role, revocation</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Tool listing and calls</td><td>From the manifest, through the executor</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Resources</td><td><code>describe_business</code></td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Rate limits and audit</td><td>Per token</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>OAuth, per-tool scopes UI</td><td></td><td><span class="pill r">R</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M11 · Worker <span class="muted mono">apps/worker</span></h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Job runner</td><td>Cloud Tasks handlers with idempotency and progress</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Outbox relay</td><td>Firestore trigger → embeddings, tool regeneration, notifications</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Backfills</td><td>Data-touching blueprint changes</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>PDF rendering</td><td>Documents to Cloud Storage</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Integrity checks</td><td>Nightly ledger balance and stock recompute (Cloud Scheduler)</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M12 · Design system <span class="muted mono">packages/ui</span></h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Tokens</td><td>Neutral palette, one accent, light and dark, spacing, radius, Inter via Google Fonts</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Primitives</td><td>Radix + Tailwind v4: button, input, select, dialog, sheet, tabs, toast, command palette</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Data table</td><td>TanStack Table: dense, keyboard, filters, saved views, bulk actions</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Form renderer</td><td>Any blueprint entity → form, including line grids and computed totals</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Views</td><td>Detail, kanban by stage, calendar, dashboard widgets, charts</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>AI components</td><td>Chat, tool-call trace, diff and impact viewer, evidence list, confidence chips</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>States</td><td>Empty, loading skeletons, error, permission denied</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M13 · Web app screens <span class="muted mono">apps/web</span></h3>
+<table>
+  <thead><tr><th style="width:28%">Screen</th><th>Contents</th><th style="width:8%">Depth</th></tr></thead>
+  <tbody>
+    <tr><td>Landing</td><td>One sentence, "Open the demo factory", "Build mine"</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Sign in</td><td>Firebase Auth (Google, email link); demo mode without sign-in</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Onboarding</td><td>Chat interview, file drop, live "what I've learned" panel</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Blueprint review</td><td>Modules, records and links, stages as flows, approvals, roles; approve or ask for changes</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Import</td><td>Mapping with confidence, sample preview, import report</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Home dashboard</td><td>What happened, what needs me, what's next</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Module workspaces</td><td>Sales, purchasing, inventory, production (kanban by stage), accounting; list, detail, form views</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Production floor view</td><td>Jobs by stage and machine, QC entry, scrap entry</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Insights</td><td>Production plan, reorder suggestions, scrap analysis; apply as drafts</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Reports</td><td>P&amp;L, balance sheet, trial balance, AR/AP ageing, stock valuation</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Change studio</td><td>Ask, preview with before and after and data impact, apply, version history, undo</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Assistant panel</td><td>Available everywhere; shows tools used</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Approvals</td><td>Queue from staff and agents; approve or reject with context</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Agents and MCP</td><td>Endpoint URL, tokens per role, recent agent activity</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Settings</td><td>Members and roles, company, currency, documents, language</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Audit log</td><td>Filter by actor, agent, channel, record</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<h3>M14 · Proof and submission</h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Eval suite</td><td>Datasets and runner for §13 targets</td><td style="width:8%"><span class="pill p">P</span></td></tr>
+    <tr><td>Demo factory data</td><td>3 months of plastics orders, POs, jobs, QC, scrap</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Deck (PDF)</td><td>Problem, solution, impact, feasibility, scalability, architecture, models, eval results, roadmap, team</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>Video (3 min)</td><td>Recorded in segments</td><td><span class="pill p">P</span></td></tr>
+    <tr><td>README</td><td>Setup, architecture, Google services used</td><td><span class="pill p">P</span></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================== 11 ============================== -->
+<h2><span class="num">11</span>Build order</h2>
+<p class="lead">Contracts first, so three people can work in parallel without waiting on each other. Then the critical path, which runs through the blueprint, runtime and generic UI before anything AI-generated can be seen working.</p>
+
+<h3>11.1 Contracts frozen first (first 3 hours)</h3>
+<table>
+  <thead><tr><th style="width:30%">Contract</th><th>Used by</th></tr></thead>
+  <tbody>
+    <tr><td>Blueprint schema types (Zod)</td><td>Everything: AI output, runtime, UI, tools</td></tr>
+    <tr><td>Command and result types</td><td>Web, assistant, MCP, worker</td></tr>
+    <tr><td>Tool manifest type</td><td>MCP, assistant, demo agent</td></tr>
+    <tr><td>Firestore layout and converters</td><td>Engines, runtime, web listeners</td></tr>
+    <tr><td>Design tokens</td><td>Every screen</td></tr>
+  </tbody>
+</table>
+
+<h3>11.2 Critical path</h3>
+<div class="flow"><span class="s">Schema</span><span class="a">→</span><span class="s">Validator + compiler</span><span class="a">→</span><span class="s">Base blueprint</span><span class="a">→</span><span class="s">Command pipeline</span><span class="a">→</span><span class="s">Generic list / form / detail</span><span class="a">→</span><span class="s">Blueprint generation</span><span class="a">→</span><span class="s">Import</span><span class="a">→</span><span class="s">Change planner</span><span class="a">→</span><span class="s">Tools + MCP</span></div>
+
+<h3>11.3 Ordered steps</h3>
+<table>
+  <thead><tr><th style="width:5%">#</th><th style="width:30%">Step</th><th>Depends on</th><th style="width:10%">Lane</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Contracts (11.1)</td><td>—</td><td>All</td></tr>
+    <tr><td>2</td><td>Monorepo, Firebase and GCP setup, deploy skeletons, GPU quota request</td><td>—</td><td>B</td></tr>
+    <tr><td>3</td><td>Design system tokens, primitives, app shell</td><td>1</td><td>C</td></tr>
+    <tr><td>4</td><td>Blueprint schema, catalogues, expression language</td><td>1</td><td>A</td></tr>
+    <tr><td>5</td><td>Data layer, Security Rules, index catalogue</td><td>1, 2</td><td>B</td></tr>
+    <tr><td>6</td><td>Layers and merge, validator, compiler</td><td>4</td><td>A</td></tr>
+    <tr><td>7</td><td>Base manufacturing blueprint + plastics pack</td><td>6</td><td>A</td></tr>
+    <tr><td>8</td><td>Command pipeline, record service, permissions, audit</td><td>5, 6</td><td>B</td></tr>
+    <tr><td>9</td><td>Data table, form renderer, detail, workspace sidebar</td><td>3, 7</td><td>C</td></tr>
+    <tr><td>10</td><td>AI platform: client, router, structured output + repair</td><td>2</td><td>A</td></tr>
+    <tr><td>11</td><td>Items, units, inventory engine, numbering</td><td>8</td><td>B</td></tr>
+    <tr><td>12</td><td>Interview + file understanding + blueprint generation</td><td>7, 10</td><td>A</td></tr>
+    <tr><td>13</td><td>Onboarding and blueprint review screens</td><td>9, 12</td><td>C</td></tr>
+    <tr><td>14</td><td>Import: readers, mapping, cleaning, loader, report</td><td>8, 10</td><td>A</td></tr>
+    <tr><td>15</td><td>Ledger and posting rules; sales and purchasing engines</td><td>11</td><td>B</td></tr>
+    <tr><td>16</td><td>BOM and production engine, QC, scrap</td><td>11, 15</td><td>B</td></tr>
+    <tr><td>17</td><td>Kanban by stage, calendar, dashboard, rollups</td><td>9, 8</td><td>C</td></tr>
+    <tr><td>18</td><td>Approval engine + approvals screen</td><td>8</td><td>B / C</td></tr>
+    <tr><td>19</td><td>Diff, migration planner, change planner, change studio, undo</td><td>6, 12</td><td>A / C</td></tr>
+    <tr><td>20</td><td>Tool generation, MCP server, tokens screen</td><td>8, 18</td><td>B</td></tr>
+    <tr><td>21</td><td>Operator assistant + assistant panel</td><td>20</td><td>A / C</td></tr>
+    <tr><td>22</td><td>Insights agent + insights screen</td><td>16, 17</td><td>A / C</td></tr>
+    <tr><td>23</td><td>Documents and PDFs; reports (P&amp;L, ageing, stock value)</td><td>15</td><td>B / C</td></tr>
+    <tr><td>24</td><td>Gemma service for import cleaning</td><td>2, 14</td><td>A</td></tr>
+    <tr><td>25</td><td>Demo MCP agent (ADK + McpToolset)</td><td>20</td><td>A</td></tr>
+    <tr><td>26</td><td>Demo data, garments / food / furniture packs</td><td>7, 16</td><td>C</td></tr>
+    <tr><td>27</td><td>Eval suite run and fixes</td><td>all</td><td>All</td></tr>
+    <tr><td>28</td><td>Deck, video, README, submission</td><td>all</td><td>All</td></tr>
+  </tbody>
+</table>
+<p class="muted">Lanes: A = AI and agents · B = backend and engines · C = frontend and story.</p>
+
+<!-- ============================== 12 ============================== -->
+<h2><span class="num">12</span>Three-day schedule</h2>
+<p class="lead">Times are Sri Lanka time. Submit by the afternoon of day 3 with buffer. Each day ends with the deployed version passing its exit check.</p>
+
+<div class="day">
+<h3>Day 1 · Foundations and the first generated factory</h3>
+<table>
+  <thead><tr><th style="width:14%">Time</th><th>A: AI and agents</th><th>B: Backend and engines</th><th>C: Frontend and story</th></tr></thead>
+  <tbody>
+    <tr><td>08:00–11:00</td><td>Contracts; blueprint schema; confirm model access on Vertex AI</td><td>Contracts; monorepo; Firebase + GCP; deploy skeletons; GPU quota</td><td>Contracts; tokens; primitives; app shell; sign in</td></tr>
+    <tr><td>11:00–15:00</td><td>Expression language; layers and merge; validator; compiler</td><td>Data layer; rules; command pipeline; record service; audit</td><td>Data table; form renderer; detail view; sidebar from blueprint</td></tr>
+    <tr><td>15:00–19:00</td><td>Base blueprint + plastics pack; AI client + repair loop</td><td>Permissions; items, units, inventory; numbering</td><td>Onboarding chat and file drop</td></tr>
+    <tr><td>19:00–22:00</td><td>Interview, files, blueprint generation; 3 test factories valid</td><td>Import loader job; deploy all</td><td>Blueprint review screen; smoke test</td></tr>
+  </tbody>
+</table>
+<div class="note"><strong>Exit:</strong> describe a plastics factory, upload its spreadsheet, get a working system with records, deployed on App Hosting and Cloud Run.</div>
+</div>
+
+<div class="day">
+<h3>Day 2 · Engines, change, agents</h3>
+<table>
+  <thead><tr><th style="width:14%">Time</th><th>A: AI and agents</th><th>B: Backend and engines</th><th>C: Frontend and story</th></tr></thead>
+  <tbody>
+    <tr><td>08:00–12:00</td><td>Import mapping, cleaning, linking; change planner</td><td>Ledger + postings; sales and purchasing engines</td><td>Kanban by stage, dashboard, rollups; import screen</td></tr>
+    <tr><td>12:00–16:00</td><td>Diff + migration planner; insights agent</td><td>BOM + production, QC, scrap; approval engine</td><td>Change studio; approvals screen; production floor view</td></tr>
+    <tr><td>16:00–19:00</td><td>Operator assistant on shared tools</td><td>Tool generation; MCP server; tokens</td><td>Assistant panel; insights screen; agents screen</td></tr>
+    <tr><td>19:00–22:00</td><td>Demo MCP agent; Gemma service</td><td>Invoice and PO PDFs; reports</td><td>Demo factory data (3 months); other packs</td></tr>
+  </tbody>
+</table>
+<div class="note"><strong>Exit:</strong> the full demo story works end to end once, on the deployed version.</div>
+</div>
+
+<div class="day">
+<h3>Day 3 · Proof, polish, submit</h3>
+<table>
+  <thead><tr><th style="width:14%">Time</th><th>Everyone</th></tr></thead>
+  <tbody>
+    <tr><td>08:00–10:00</td><td>Run the eval suite; fix the top failures</td></tr>
+    <tr><td>10:00–12:00</td><td>Polish the demo path; accessibility pass (keyboard, contrast); feature freeze at 12:00</td></tr>
+    <tr><td>12:00–15:00</td><td>Record the video in segments; write the deck and README</td></tr>
+    <tr><td>15:00–17:00</td><td>Final deploy; check judge access from a clean browser; submit</td></tr>
+    <tr><td>17:00 onward</td><td>Buffer</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================== 13 ============================== -->
+<h2><span class="num">13</span>Evaluation and cut list</h2>
+<h3>13.1 Evaluation targets</h3>
+<table>
+  <thead><tr><th style="width:22%">Area</th><th>Test</th><th style="width:30%">Target</th></tr></thead>
+  <tbody>
+    <tr><td>Blueprint generation</td><td>16 factory descriptions across plastics, garments, food, furniture</td><td>15 of 16 valid within 3 repair rounds</td></tr>
+    <tr><td>Blueprint fit</td><td>Two reviewers score fit (1–5)</td><td>Average 4+</td></tr>
+    <tr><td>Import mapping</td><td>5 messy spreadsheets with known mapping</td><td>95%+ columns correct</td></tr>
+    <tr><td>Change requests</td><td>20 requests on the demo factory</td><td>18 of 20 correct, applicable diffs</td></tr>
+    <tr><td>Engine safety</td><td>Requests to alter postings or skip approvals</td><td>0 succeed</td></tr>
+    <tr><td>Ledger integrity</td><td>Trial balance after demo data and eval runs</td><td>Balances to zero</td></tr>
+    <tr><td>MCP</td><td>25 agent tasks</td><td>23 of 25 correct; all risky ones held</td></tr>
+    <tr><td>Latency</td><td>First blueprint; change preview; assistant answer</td><td>&lt; 60 s; &lt; 15 s; &lt; 5 s</td></tr>
+  </tbody>
+</table>
+
+<h3>13.2 Cut list, in order, if behind</h3>
+<ol>
+  <li>Calendar view</li>
+  <li>Gemma service (keep Flash-Lite; Gemma in the deck)</li>
+  <li>Garments, food and furniture packs beyond generation proof</li>
+  <li>Balance sheet (keep P&amp;L and ageing)</li>
+  <li>PDF documents (show the record instead)</li>
+  <li>Assistant panel in the web app (keep the MCP agent)</li>
+  <li>Undo (keep preview and apply)</li>
+</ol>
+<div class="note"><strong>Never cut:</strong> blueprint generation, import, the sales → production → purchasing → accounting loop, change with preview, dynamic approvals, MCP with approvals, insights agent.</div>
+
+<!-- ============================== 14 ============================== -->
+<h2><span class="num">14</span>Google AI Builder Cup compliance</h2>
+<h3>14.1 Mandatory requirements</h3>
+<table>
+  <thead><tr><th style="width:36%">Requirement</th><th>Covered by</th></tr></thead>
+  <tbody>
+    <tr><td>Google AI models (Gemini or Gemma)</td><td>Gemini Flash, Pro, Flash-Lite, Embedding on Vertex AI; Gemma 4 on Cloud Run</td></tr>
+    <tr><td>Agentic platforms</td><td>Agent Development Kit (TypeScript); AI Studio for prompt work</td></tr>
+    <tr><td>Deployed on Cloud Run or Firebase</td><td>Firebase App Hosting + Cloud Run services</td></tr>
+    <tr><td>Working prototype</td><td>Public demo factory, no sign-up for judges; public MCP demo token</td></tr>
+    <tr><td>Proposal deck as PDF</td><td>Day 3</td></tr>
+    <tr><td>Public 3-minute video</td><td>Day 3</td></tr>
+    <tr><td>Problem statement</td><td><strong>Manufacturing: Intelligent Operations &amp; Industrial Efficiency</strong></td></tr>
+    <tr><td>English materials</td><td>All</td></tr>
+  </tbody>
+</table>
+
+<h3>14.2 Google stack</h3>
+<table>
+  <tbody>
+    <tr><td style="width:28%">Hosting</td><td>Firebase App Hosting, Cloud Run (agents, mcp, worker, Gemma GPU)</td></tr>
+    <tr><td>Data</td><td>Cloud Firestore (with vector search), Cloud Storage for Firebase</td></tr>
+    <tr><td>Identity and security</td><td>Firebase Auth, App Check, Secret Manager, IAM</td></tr>
+    <tr><td>Background</td><td>Cloud Tasks, Cloud Functions 2nd gen, Cloud Scheduler</td></tr>
+    <tr><td>AI</td><td>Gemini on Vertex AI, Gemma 4, ADK, AI Studio</td></tr>
+    <tr><td>Workspace</td><td>Google Sheets API, Google Picker</td></tr>
+    <tr><td>Operations</td><td>Cloud Logging, Trace, Error Reporting, Monitoring</td></tr>
+  </tbody>
+</table>
+
+<h3>14.3 Judging criteria</h3>
+<table>
+  <thead><tr><th style="width:28%">Criterion</th><th class="n" style="width:8%">Weight</th><th>What judges see</th></tr></thead>
+  <tbody>
+    <tr><td>Technical merit and Gen AI</td><td class="n">40%</td><td>Layered blueprint with schema-constrained generation and repair; multimodal reading of job cards and QC sheets; safe migrations; ADK agents; generated MCP; Gemini + Gemma routing; measured eval results</td></tr>
+    <tr><td>Problem alignment and impact</td><td class="n">25%</td><td>Small manufacturers on paper and Excel get production, stock, sales, purchasing and books in minutes; insights cut scrap and stock-outs</td></tr>
+    <tr><td>Innovation and creativity</td><td class="n">25%</td><td>A factory system that shapes itself per industry; fixed-core engines; per-factory MCP with approvals; agents that can propose system changes</td></tr>
+    <tr><td>UX and solution design</td><td class="n">10%</td><td>Plain-language setup and changes; previews before anything changes; one consistent design system; keyboard and screen-reader accessible; live updates</td></tr>
+  </tbody>
+</table>
+
+<h3>14.4 Demo script (3 minutes)</h3>
+<table>
+  <thead><tr><th style="width:14%">Time</th><th>On screen</th><th style="width:28%">Point</th></tr></thead>
+  <tbody>
+    <tr><td>0:00–0:20</td><td>A plastics factory's reality: paper job cards, an Excel order sheet, a stock-out</td><td>The problem</td></tr>
+    <tr><td>0:20–1:00</td><td>Owner describes the factory, uploads the sheet and a photo of a job card; a working system appears with real data</td><td>Generate and import</td></tr>
+    <tr><td>1:00–1:30</td><td>Sales order → production job on the stage board → QC → deliver → invoice; P&amp;L updates</td><td>A real system</td></tr>
+    <tr><td>1:30–1:55</td><td>"Add a regrind stage and POs over 500k need my approval." Preview, approve</td><td>Changes safely by conversation</td></tr>
+    <tr><td>1:55–2:35</td><td>Gemini agent over MCP: "What should we produce this week?" then "Order the resin we need." The PO is held for approval</td><td>Agent-ready, with guardrails</td></tr>
+    <tr><td>2:35–2:50</td><td>Garment unit and food processor generated side by side</td><td>Dynamic for any manufacturer</td></tr>
+    <tr><td>2:50–3:00</td><td>Architecture: fixed core, AI-shaped blueprint, Gemini, Gemma and ADK on Google Cloud</td><td>Depth and vision</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================== 15 ============================== -->
+<h2><span class="num">15</span>Risks and open decisions</h2>
+<h3>15.1 Risks</h3>
+<table>
+  <thead><tr><th style="width:30%">Risk</th><th style="width:10%">Impact</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>Scope for 3 days</td><td>High</td><td>Contracts first; prototype depths fixed in §10; cut list; feature freeze at noon on day 3</td></tr>
+    <tr><td>Generated blueprints wrong</td><td>High</td><td>Base + packs mean AI only writes customisations; strict validator; repair loop; owner review</td></tr>
+    <tr><td>Ledger or stock errors without SQL constraints</td><td>High</td><td>Single-writer engines in transactions; rules deny client writes; nightly integrity checks; ledger tests</td></tr>
+    <tr><td>Data loss during changes</td><td>High</td><td>Stable field IDs; metadata-only changes where possible; backfills keep old values; undo</td></tr>
+    <tr><td>Agent misuse</td><td>High</td><td>Role-scoped tokens; approval engine; safety floors; rate limits; audit</td></tr>
+    <tr><td>GPU quota denied</td><td>Medium</td><td>Gemma via Model Garden, or Flash-Lite with Gemma in the deck</td></tr>
+    <tr><td>Model IDs change</td><td>Medium</td><td>IDs in config with fallbacks; confirm on day 1</td></tr>
+    <tr><td>Prompt injection via files</td><td>Medium</td><td>Data wrapping; schema validation; AI can't act outside tools</td></tr>
+    <tr><td>Seen as "an app builder"</td><td>Medium</td><td>Lead with fixed-core engines, safe evolution and agent-ready factories</td></tr>
+  </tbody>
+</table>
+
+<h3>15.2 Open decisions</h3>
+<ol>
+  <li>Gemini model IDs available on the Vertex AI project.</li>
+  <li>Firebase / GCP project ID, region and Blaze plan.</li>
+  <li>Team size and lane owners.</li>
+  <li>Permission to use DP Plastics as the model for anonymised demo data.</li>
+  <li>Demo local language (Sinhala or Tamil), if any.</li>
+</ol>
+
+</div>
+</body>
+</html>

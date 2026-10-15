@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// Clients never write. Every write goes through the server command pipeline
+// (Admin SDK), which bypasses these rules. Clients may only read inside tenants
+// listed in their custom claims: token.tenants = { "<tid>": "<roleKey>" }.
+// Row-level scopes (e.g. a supervisor sees only their jobs) are enforced here
+// through `assignees`, which the server materialises from user fields.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function role(tid) {
+      return signedIn() && request.auth.token.tenants is map && tid in request.auth.token.tenants
+        ? request.auth.token.tenants[tid]
+        : null;
+    }
+    function member(tid) {
+      return role(tid) != null;
+    }
+    // The server materialises readScope / readRoles / assignees from the blueprint's
+    // role permissions on every write. List queries must filter the same way
+    // (e.g. where("assignees", "array-contains", uid)) or Firestore rejects them.
+    function canReadRecord(tid, rec) {
+      return member(tid) && (
+        role(tid) == "owner"
+        || rec.get("readScope", "") == "all"
+        || role(tid) in rec.get("readRoles", [])
+        || request.auth.uid in rec.get("assignees", [])
+      );
+    }
+
+    match /tenants/{tid} {
+      allow read: if member(tid);
+      allow write: if false;
+
+      match /members/{uid} {
+        allow read: if member(tid) && (uid == request.auth.uid || role(tid) == "owner");
+        allow write: if false;
+      }
+
+      match /records/{rid} {
+        allow get, list: if canReadRecord(tid, resource.data);
+        allow write: if false;
+      }
+
+      // Role keys come from each tenant's blueprint, so apart from "owner" nothing
+      // is hard-coded: approvals and changes carry the roles that may see them.
+      match /{col}/{id} {
+        allow read: if member(tid) && (
+          col in ["blueprints", "stockLevels", "jobs", "rollups"]
+          || (col in ["approvals", "changes"] && (role(tid) == "owner" || role(tid) in resource.data.get("readRoles", [])))
+          || (col in ["accounts", "journal", "stockMoves", "audit"] && role(tid) == "owner")
+        );
+        allow write: if false;
+      }
+    }
+
+    // MCP token lookups, sequences and the outbox are server only.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

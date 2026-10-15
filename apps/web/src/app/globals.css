@@ -1,0 +1,78 @@
+@import "tailwindcss";
+@import "@shapewise/ui/tokens.css";
+
+/* Scan the shared UI package for class names too. */
+@source "../../../../packages/ui/src";
+
+@theme inline {
+  --color-canvas: var(--sw-canvas);
+  --color-surface: var(--sw-surface);
+  --color-surface-sunken: var(--sw-surface-sunken);
+  --color-rail: var(--sw-rail);
+  --color-rail-ink: var(--sw-rail-ink);
+  --color-rail-muted: var(--sw-rail-muted);
+  --color-rail-active: var(--sw-rail-active);
+  --color-ink: var(--sw-ink);
+  --color-ink-muted: var(--sw-ink-muted);
+  --color-ink-faint: var(--sw-ink-faint);
+  --color-border: var(--sw-border);
+  --color-border-strong: var(--sw-border-strong);
+  --color-accent: var(--sw-accent);
+  --color-accent-hover: var(--sw-accent-hover);
+  --color-accent-ink: var(--sw-accent-ink);
+  --color-accent-soft: var(--sw-accent-soft);
+  --color-focus: var(--sw-focus);
+  --color-neutral-bg: var(--sw-neutral-bg);
+  --color-neutral-fg: var(--sw-neutral-fg);
+  --color-info-bg: var(--sw-info-bg);
+  --color-info-fg: var(--sw-info-fg);
+  --color-success-bg: var(--sw-success-bg);
+  --color-success-fg: var(--sw-success-fg);
+  --color-warning-bg: var(--sw-warning-bg);
+  --color-warning-fg: var(--sw-warning-fg);
+  --color-danger-bg: var(--sw-danger-bg);
+  --color-danger-fg: var(--sw-danger-fg);
+
+  --radius-sw: var(--sw-radius);
+  --radius-sw-sm: var(--sw-radius-sm);
+  --shadow-overlay: var(--sw-shadow-overlay);
+
+  --font-sans: var(--sw-font-sans);
+  --font-mono: var(--sw-font-mono);
+}
+
+@layer base {
+  html {
+    font-feature-settings: "cv11", "ss01";
+  }
+  body {
+    background: var(--sw-canvas);
+    color: var(--sw-ink);
+    font-family: var(--sw-font-sans);
+    font-weight: var(--sw-weight-regular);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Two weights only: anything asking for bold gets medium. */
+  b,
+  strong,
+  h1,
+  h2,
+  h3,
+  h4,
+  th {
+    font-weight: var(--sw-weight-medium);
+  }
+  *,
+  ::before,
+  ::after {
+    border-color: var(--sw-border);
+  }
+  :focus-visible {
+    outline: 2px solid var(--sw-focus);
+    outline-offset: 2px;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}

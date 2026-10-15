@@ -1,0 +1,1 @@
+export { plasticsFactory } from "./plastics";

@@ -1,0 +1,125 @@
+/*
+ * Shapewise design tokens. Warm grey ink on off-white, one cobalt accent used
+ * only for the primary action, links and focus. Status colours are quiet tints
+ * with dark text from the same family. No gradients, no glows, two weights.
+ *
+ * Apps consume these through Tailwind v4 (`@theme inline` in the app's CSS),
+ * so every generated screen for any blueprint uses the same values.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* neutrals: warm grey */
+  --sw-canvas: #f7f6f3;
+  --sw-surface: #ffffff;
+  --sw-surface-sunken: #f1efea;
+  --sw-rail: #1c1a17;
+  --sw-rail-ink: #e9e6df;
+  --sw-rail-muted: #a29d93;
+  --sw-rail-active: #2c2925;
+  --sw-ink: #1c1a17;
+  --sw-ink-muted: #6b665e;
+  --sw-ink-faint: #8f897f;
+  --sw-border: #e5e2db;
+  --sw-border-strong: #d3cfc6;
+
+  /* the one accent: cobalt */
+  --sw-accent: #2b4acb;
+  --sw-accent-hover: #233ea9;
+  --sw-accent-ink: #ffffff;
+  --sw-accent-soft: #e8ecfb;
+  --sw-focus: #2b4acb;
+
+  /* status tints: background / text */
+  --sw-neutral-bg: #efede8;
+  --sw-neutral-fg: #4a463f;
+  --sw-info-bg: #e8ecfb;
+  --sw-info-fg: #23367f;
+  --sw-success-bg: #e3f2e7;
+  --sw-success-fg: #1d5a32;
+  --sw-warning-bg: #fbf0d9;
+  --sw-warning-fg: #6e4a0b;
+  --sw-danger-bg: #fbe5e2;
+  --sw-danger-fg: #8a2318;
+
+  /* shape and rhythm */
+  --sw-radius: 8px;
+  --sw-radius-sm: 6px;
+  --sw-border-width: 1px;
+  --sw-shadow-overlay: 0 8px 24px rgb(28 26 23 / 0.08), 0 1px 2px rgb(28 26 23 / 0.06);
+  --sw-rail-width: 232px;
+  --sw-topbar-height: 52px;
+
+  /* type: Inter first, then Sinhala and Tamil faces for local-language labels */
+  --sw-font-sans: var(--font-inter), var(--font-sinhala), var(--font-tamil), ui-sans-serif, system-ui, sans-serif;
+  --sw-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --sw-weight-regular: 400;
+  --sw-weight-medium: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --sw-canvas: #151412;
+    --sw-surface: #1c1b18;
+    --sw-surface-sunken: #121110;
+    --sw-rail: #0f0e0d;
+    --sw-rail-ink: #e9e6df;
+    --sw-rail-muted: #8f897f;
+    --sw-rail-active: #23211e;
+    --sw-ink: #ece9e2;
+    --sw-ink-muted: #a6a097;
+    --sw-ink-faint: #7d776e;
+    --sw-border: #2c2a26;
+    --sw-border-strong: #3a3732;
+    --sw-accent: #7d95f2;
+    --sw-accent-hover: #97aaf5;
+    --sw-accent-ink: #0f1430;
+    --sw-accent-soft: #1d2445;
+    --sw-focus: #7d95f2;
+    --sw-neutral-bg: #2a2824;
+    --sw-neutral-fg: #d6d2ca;
+    --sw-info-bg: #1d2445;
+    --sw-info-fg: #b8c5f8;
+    --sw-success-bg: #17301f;
+    --sw-success-fg: #a7dcb5;
+    --sw-warning-bg: #352812;
+    --sw-warning-fg: #f0cf8e;
+    --sw-danger-bg: #3a1b17;
+    --sw-danger-fg: #f2b0a6;
+    --sw-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --sw-canvas: #151412;
+  --sw-surface: #1c1b18;
+  --sw-surface-sunken: #121110;
+  --sw-rail: #0f0e0d;
+  --sw-rail-ink: #e9e6df;
+  --sw-rail-muted: #8f897f;
+  --sw-rail-active: #23211e;
+  --sw-ink: #ece9e2;
+  --sw-ink-muted: #a6a097;
+  --sw-ink-faint: #7d776e;
+  --sw-border: #2c2a26;
+  --sw-border-strong: #3a3732;
+  --sw-accent: #7d95f2;
+  --sw-accent-hover: #97aaf5;
+  --sw-accent-ink: #0f1430;
+  --sw-accent-soft: #1d2445;
+  --sw-focus: #7d95f2;
+  --sw-neutral-bg: #2a2824;
+  --sw-neutral-fg: #d6d2ca;
+  --sw-info-bg: #1d2445;
+  --sw-info-fg: #b8c5f8;
+  --sw-success-bg: #17301f;
+  --sw-success-fg: #a7dcb5;
+  --sw-warning-bg: #352812;
+  --sw-warning-fg: #f0cf8e;
+  --sw-danger-bg: #3a1b17;
+  --sw-danger-fg: #f2b0a6;
+  --sw-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.4);
+}

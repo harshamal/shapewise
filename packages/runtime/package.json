@@ -1,0 +1,13 @@
+{
+  "name": "@shapewise/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@shapewise/blueprint": "workspace:*", "zod": "^4.4.3" },
+  "devDependencies": { "vitest": "^3.2.4", "typescript": "^5.9.3" }
+}
