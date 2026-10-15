@@ -6,19 +6,22 @@ const envelope = {
   tenantId: "t_demo",
   actor: { kind: "agent", id: "tok_abc", roleKey: "supervisor", channel: "mcp", clientName: "ADK demo" },
   issuedAt: "2026-10-16T08:00:00.000Z",
-  idempotencyKey: "job-42-stage-2",
+  idempotencyKey: "batch-42-release",
 };
 
 describe("command envelope", () => {
   it("accepts each command type", () => {
     const commands = [
-      { type: "record.create", entity: "ent_customer", data: { fld_cname: "Perera Stores" } },
-      { type: "record.update", entity: "ent_customer", recordId: "r1", patch: { fld_cphone: "0771234567" }, expectedVersion: 3 },
-      { type: "record.delete", entity: "ent_customer", recordId: "r1" },
-      { type: "record.transition", entity: "ent_order", recordId: "r2", transition: "tr_conf" },
-      { type: "engine.action", binding: "production.job", action: "record_scrap", entity: "ent_job", recordId: "r3", input: { qty: 12 } },
+      { type: "record.create", target: "customer", data: { name: "Perera Stores" } },
+      { type: "record.create", target: "ent_maint", data: { fld_mtitle: "Replace heater band" } },
+      { type: "record.update", target: "customer", recordId: "r1", patch: { phone: "0771234567" }, expectedVersion: 3 },
+      { type: "record.delete", target: "ent_maint", recordId: "r1" },
+      { type: "record.action", target: "invoice", recordId: "r2", action: "post" },
+      { type: "record.action", target: "batch", recordId: "r3", action: "release", data: { qc_note: "ok" } },
+      { type: "record.convert", from: "quote", recordId: "r4", to: "sales_order" },
+      { type: "record.convert", from: "sales_order", recordId: "r5", to: "delivery_note", lines: [{ lineId: "l1", quantity: 500 }] },
       { type: "approval.decide", approvalId: "a1", decision: "approve" },
-      { type: "change.propose", request: "Add a regrind stage after moulding" },
+      { type: "change.propose", request: "Add a regrind step after moulding" },
       { type: "change.apply", changeId: "c1" },
       { type: "change.undo", changeId: "c1" },
     ];
@@ -28,9 +31,9 @@ describe("command envelope", () => {
     }
   });
 
-  it("rejects unknown engine bindings and bad entity ids", () => {
-    expect(CommandEnvelope.safeParse({ ...envelope, command: { type: "engine.action", binding: "x.y", action: "go", entity: "ent_job", input: {} } }).success).toBe(false);
-    expect(CommandEnvelope.safeParse({ ...envelope, command: { type: "record.create", entity: "customer", data: {} } }).success).toBe(false);
+  it("rejects unknown record types", () => {
+    expect(CommandEnvelope.safeParse({ ...envelope, command: { type: "record.create", target: "spaceship", data: {} } }).success).toBe(false);
+    expect(CommandEnvelope.safeParse({ ...envelope, command: { type: "record.convert", from: "quote", recordId: "r", to: "ent_x" } }).success).toBe(false);
   });
 });
 

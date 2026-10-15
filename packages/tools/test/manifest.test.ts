@@ -24,16 +24,16 @@ describe("toolName", () => {
 });
 
 describe("ToolDefinition", () => {
-  it("accepts a write tool bound to a transition", () => {
+  it("accepts a write tool bound to a lifecycle action", () => {
     const def = {
       name: "confirm_sales_order",
-      kind: "transition",
+      kind: "action",
       description: "Confirm a draft sales order.",
       inputSchema: { type: "object", properties: { record_id: { type: "string" } }, required: ["record_id"] },
       annotations: { title: "Confirm sales order", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      entity: "ent_order",
-      command: { type: "record.transition", entity: "ent_order", target: "tr_conf" },
-      requires: "transition:confirm",
+      target: "sales_order",
+      command: { type: "record.action", target: "sales_order", action: "confirm" },
+      requires: { target: "sales_orders", action: "approve" },
       mayNeedApproval: true,
     };
     expect(ToolDefinition.safeParse(def).success).toBe(true);

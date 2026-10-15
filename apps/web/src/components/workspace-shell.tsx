@@ -2,34 +2,26 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import type { NavSection } from "@shapewise/blueprint";
 import { cx } from "@shapewise/ui";
 
-export interface NavItem {
-  href: string;
-  label: string;
-  /** Only active on an exact match (e.g. the workspace overview). */
-  exact?: boolean;
-}
-
-export interface NavGroup {
-  label?: string;
-  items: NavItem[];
-}
-
 /**
- * Workspace frame: a dark warm-grey rail (brand, navigation from the blueprint's
- * modules, workspace name) and a calm canvas with a slim top bar.
+ * Workspace frame: a dark warm-grey rail (brand, sections → modules →
+ * submodules from the blueprint) and a calm canvas with a slim top bar.
  */
 export function WorkspaceShell({
+  base,
   workspaceName,
-  nav,
+  sections,
   title,
   actions,
   children,
 }: {
+  /** /w/{tenant} */
+  base: string;
   workspaceName: string;
-  nav: NavGroup[];
+  sections: NavSection[];
   title: string;
   actions?: ReactNode;
   children: ReactNode;
@@ -42,34 +34,46 @@ export function WorkspaceShell({
         Skip to content
       </a>
 
-      <aside className="hidden flex-col bg-rail text-rail-ink md:flex" aria-label="Workspace">
-        <div className="flex h-[var(--sw-topbar-height)] items-center gap-2.5 px-5">
+      <aside className="sticky top-0 hidden h-dvh flex-col bg-rail text-rail-ink md:flex" aria-label="Workspace">
+        <div className="flex h-[var(--sw-topbar-height)] shrink-0 items-center gap-2.5 px-5">
           <Logo />
           <span className="font-medium">Shapewise</span>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Main">
-          {nav.map((group, gi) => (
-            <div key={group.label ?? gi} className="mb-4">
-              {group.label && <p className="px-2 pb-1.5 text-xs text-rail-muted">{group.label}</p>}
+        <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Main">
+          {sections.map((section) => (
+            <div key={section.key} className="mt-3">
+              <p className="px-2 pb-1 text-[11px] text-rail-muted">{section.label}</p>
               <ul className="space-y-0.5">
-                {group.items.map((item) => {
-                  const active = pathname === item.href || (!item.exact && pathname.startsWith(`${item.href}/`));
-                  return (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href as never}
-                        aria-current={active ? "page" : undefined}
-                        className={cx(
-                          "flex h-8 items-center rounded-sw-sm px-2 text-sm transition-colors",
-                          active ? "bg-rail-active text-rail-ink" : "text-rail-muted hover:bg-rail-active hover:text-rail-ink",
-                        )}
-                      >
-                        {item.label}
-                      </Link>
-                    </li>
-                  );
-                })}
+                {/* A section holding one module (Governance, Settings) lists its pages directly. */}
+                {section.modules.length === 1 && section.modules[0]!.submodules.length > 1
+                  ? section.modules[0]!.submodules.map((s) => {
+                      const href = `${base}/${section.modules[0]!.key}/${s.key}`;
+                      return (
+                        <li key={s.key}>
+                          <NavLink href={href} active={pathname === href || pathname.startsWith(`${href}/`)}>
+                            {s.label}
+                          </NavLink>
+                        </li>
+                      );
+                    })
+                  : section.modules.map((m) => {
+                      const href = `${base}/${m.key}`;
+                      // Single-page modules (Overview, Reports) link straight to their page.
+                      if (m.submodules.length === 1) {
+                        const only = m.submodules[0]!;
+                        const target = m.key === "overview" ? base : `${href}/${only.key}`;
+                        const active = m.key === "overview" ? pathname === base : pathname.startsWith(href);
+                        return (
+                          <li key={m.key}>
+                            <NavLink href={target} active={active}>
+                              {m.label}
+                            </NavLink>
+                          </li>
+                        );
+                      }
+                      return <ModuleGroup key={m.key} href={href} label={m.label} pathname={pathname} items={m.submodules.map((s) => ({ href: `${href}/${s.key}`, label: s.label }))} />;
+                    })}
               </ul>
             </div>
           ))}
@@ -88,6 +92,58 @@ export function WorkspaceShell({
         </main>
       </div>
     </div>
+  );
+}
+
+function ModuleGroup({ href, label, items, pathname }: { href: string; label: string; items: { href: string; label: string }[]; pathname: string }) {
+  const inside = pathname === href || pathname.startsWith(`${href}/`);
+  const [open, setOpen] = useState(inside);
+  const id = `nav-${href.replaceAll("/", "-")}`;
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen((o) => !o)}
+        className={cx(
+          "flex h-8 w-full items-center justify-between rounded-sw-sm px-2 text-left text-sm transition-colors hover:bg-rail-active hover:text-rail-ink",
+          inside ? "text-rail-ink" : "text-rail-muted",
+        )}
+      >
+        {label}
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" className={cx("transition-transform", open && "rotate-90")}>
+          <path d="M4.5 3 7.5 6l-3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <ul id={id} className="mb-1 ml-2 space-y-0.5 border-l border-white/10 pl-2">
+          {items.map((item) => (
+            <li key={item.href}>
+              <NavLink href={item.href} active={pathname === item.href || pathname.startsWith(`${item.href}/`)} small>
+                {item.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function NavLink({ href, active, small, children }: { href: string; active: boolean; small?: boolean; children: ReactNode }) {
+  return (
+    <Link
+      href={href as never}
+      aria-current={active ? "page" : undefined}
+      className={cx(
+        "flex items-center rounded-sw-sm px-2 transition-colors",
+        small ? "h-7 text-[13px]" : "h-8 text-sm",
+        active ? "bg-rail-active text-rail-ink" : "text-rail-muted hover:bg-rail-active hover:text-rail-ink",
+      )}
+    >
+      {children}
+    </Link>
   );
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BindingKey, EntityId, Key, TransitionId } from "@shapewise/blueprint";
+import { CoreRecordKey, Key, Target } from "@shapewise/blueprint";
 
 /**
  * The command contract. Every write in Shapewise, from the web app, the
@@ -28,18 +28,20 @@ export type Actor = z.infer<typeof Actor>;
 /* ------------------------------------------------------------------ commands */
 
 const RecordId = z.string().min(1).max(64);
-/** Record data keyed by field ID. Validated against the compiled blueprint. */
+/** Record data keyed by core field key or custom field id. Validated against the compiled blueprint. */
 const RecordData = z.record(z.string(), z.unknown());
 
 export const Command = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("record.create"),
-    entity: EntityId,
+    /** Core record type ("invoice") or custom record type id. */
+    target: Target,
+    /** Field values keyed by core field key or custom field id. */
     data: RecordData,
   }),
   z.object({
     type: z.literal("record.update"),
-    entity: EntityId,
+    target: Target,
     recordId: RecordId,
     patch: RecordData,
     /** Optimistic lock; rejected with `conflict` if the record moved on. */
@@ -47,27 +49,33 @@ export const Command = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("record.delete"),
-    entity: EntityId,
+    target: Target,
     recordId: RecordId,
     reason: z.string().max(300).optional(),
   }),
   z.object({
-    type: z.literal("record.transition"),
-    entity: EntityId,
+    /**
+     * Run a lifecycle action on a core record ("post" an invoice, "dispatch" a
+     * delivery note, "release" a batch) or a workflow transition on a custom one.
+     * The engines own what an action writes to the ledger and stock.
+     */
+    type: z.literal("record.action"),
+    target: Target,
     recordId: RecordId,
-    transition: TransitionId,
-    /** Fields set together with the transition (e.g. the rider when dispatching). */
+    action: Key,
+    /** Fields set together with the action (e.g. received_by when confirming delivery). */
     data: RecordData.optional(),
     expectedVersion: z.number().int().min(0).optional(),
   }),
   z.object({
-    type: z.literal("engine.action"),
-    binding: BindingKey,
-    /** Engine action from the binding catalogue, e.g. "receive_output". */
-    action: Key,
-    entity: EntityId,
-    recordId: RecordId.optional(),
-    input: z.record(z.string(), z.unknown()),
+    /** Turn one core record into another along a catalogue conversion (quote → sales order). */
+    type: z.literal("record.convert"),
+    from: CoreRecordKey,
+    recordId: RecordId,
+    to: CoreRecordKey,
+    /** Partial conversion: line ids and quantities; omit for everything outstanding. */
+    lines: z.array(z.object({ lineId: z.string().max(64), quantity: z.number().positive() })).max(500).optional(),
+    data: RecordData.optional(),
   }),
   z.object({
     type: z.literal("approval.decide"),

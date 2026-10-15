@@ -1,141 +1,142 @@
-import type { BlueprintInput } from "../index";
+import type { BlueprintInput } from "../schema";
+import { presetBlueprint } from "../presets/build";
 
-/** A small but complete plastics-factory blueprint used across contract tests. */
-export const plasticsFactory: BlueprintInput = {
-  schemaVersion: 1,
-  version: 1,
-  base: { id: "manufacturing", version: 1 },
-  pack: { id: "plastics", version: 1 },
-  business: { name: "Demo Plastics", currency: "LKR", locale: "en-LK", timezone: "Asia/Colombo", industry: "plastic injection moulding" },
-  modules: [
-    { id: "mod_sales", key: "sales", label: "Sales", engine: "sales", icon: "receipt" },
-    { id: "mod_prod", key: "production", label: "Production", engine: "production", icon: "factory" },
-    { id: "mod_inv", key: "inventory", label: "Inventory", engine: "inventory", icon: "boxes" },
-  ],
-  entities: [
+/**
+ * A DP Plastics-style injection moulding factory: the plastics preset plus
+ * the kind of customisations the AI adds from an interview. Used by tests and
+ * as the demo workspace.
+ */
+function build(): BlueprintInput {
+  const bp = presetBlueprint("plastics", {
+    name: "Demo Plastics",
+    legalName: "Demo Plastics (Pvt) Ltd",
+    currency: "LKR",
+    locale: "en-LK",
+    timezone: "Asia/Colombo",
+    industry: "Plastic injection moulding and IML containers",
+    tin: "114567890",
+  });
+
+  bp.settings = {
+    ...bp.settings,
+    sales: { moqMode: "block", creditLimitMode: "warn" },
+    tax: { vatRegistered: true, ssclRegistered: true, irdTaxInvoice: true },
+    general: { numbering: [{ record: "batch", pattern: "DP{yy}{mm}-{seq:4}" }] },
+  };
+
+  // Resin grade on items, filterable.
+  bp.customFields = [
+    ...(bp.customFields ?? []),
     {
-      id: "ent_customer",
-      key: "customer",
-      label: "Customer",
-      labelPlural: "Customers",
-      module: "mod_sales",
-      binding: "parties.customer",
-      titleField: "fld_cname",
-      fields: [
-        { id: "fld_cname", key: "name", label: "Name", type: "text", required: true, searchable: true, sortable: true },
-        { id: "fld_cphone", key: "phone", label: "Phone", type: "phone", unique: true },
-        { id: "fld_ccount", key: "order_count", label: "Orders", type: "computed", expr: "count(sales_order where customer = this)", resultType: "integer" },
-      ],
+      target: "item",
+      field: {
+        id: "fld_resingrade", key: "resin_grade", label: "Resin grade", type: "select", filterable: true,
+        options: [{ value: "pp_homo", label: "PP homopolymer" }, { value: "pp_copo", label: "PP copolymer" }, { value: "hdpe", label: "HDPE" }, { value: "ldpe", label: "LDPE" }],
+      },
     },
+  ];
+
+  // A custom record type: planned and breakdown maintenance on machines and moulds.
+  bp.entities = [
     {
-      id: "ent_item",
-      key: "item",
-      label: "Item",
-      labelPlural: "Items",
-      module: "mod_inv",
-      binding: "inventory.item",
-      titleField: "fld_iname",
-      lots: { enabled: true, expiry: false },
+      id: "ent_maint",
+      key: "maintenance",
+      label: "Maintenance job",
+      labelPlural: "Maintenance",
+      module: "production",
+      icon: "wrench",
+      titleField: "fld_mtitle",
+      numbering: { pattern: "MNT-{seq:4}" },
       fields: [
-        { id: "fld_iname", key: "name", label: "Name", type: "text", required: true, searchable: true },
-        { id: "fld_ikind", key: "kind", label: "Kind", type: "select", filterable: true, options: [
-          { value: "raw", label: "Raw material" },
-          { value: "finished", label: "Finished good" },
-        ] },
-        { id: "fld_iresin", key: "resin_grade", label: "Resin grade", type: "text", filterable: true },
-      ],
-    },
-    {
-      id: "ent_machine",
-      key: "machine",
-      label: "Machine",
-      labelPlural: "Machines",
-      module: "mod_prod",
-      binding: "production.resource",
-      titleField: "fld_mname",
-      fields: [{ id: "fld_mname", key: "name", label: "Name", type: "text", required: true }],
-    },
-    {
-      id: "ent_order",
-      key: "sales_order",
-      label: "Sales order",
-      labelPlural: "Sales orders",
-      module: "mod_sales",
-      binding: "sales.order",
-      titleField: "fld_ono",
-      numbering: { pattern: "SO-{yyyy}-{seq:5}" },
-      fields: [
-        { id: "fld_ono", key: "number", label: "Number", type: "text", readonly: true, engineOwned: true },
-        { id: "fld_ocust", key: "customer", label: "Customer", type: "ref", to: "ent_customer", required: true, filterable: true },
-        { id: "fld_odue", key: "due_date", label: "Due date", type: "date", required: true, sortable: true },
-        { id: "fld_olines", key: "lines", label: "Lines", type: "lines", item: "ent_item", engineOwned: true, columns: [
-          { id: "fld_olitem", key: "item", label: "Item", type: "ref", to: "ent_item", required: true },
-          { id: "fld_olqty", key: "quantity", label: "Quantity", type: "quantity", unitFromItem: "fld_olitem", required: true },
-          { id: "fld_olprice", key: "unit_price", label: "Unit price", type: "money", required: true },
-        ] },
-        { id: "fld_ototal", key: "total", label: "Total", type: "money", readonly: true, engineOwned: true },
+        { id: "fld_mtitle", key: "title", label: "What", type: "text", required: true, searchable: true },
+        { id: "fld_mres", key: "resource", label: "Machine or mould", type: "ref", to: "resource", required: true, filterable: true },
+        { id: "fld_mkind", key: "kind", label: "Kind", type: "select", filterable: true, options: [{ value: "planned", label: "Planned" }, { value: "breakdown", label: "Breakdown", tone: "danger" }] },
+        { id: "fld_mdue", key: "due_date", label: "Due", type: "date", sortable: true },
+        { id: "fld_mtech", key: "technician", label: "Technician", type: "user", filterable: true },
+        { id: "fld_mdown", key: "downtime_min", label: "Downtime (min)", type: "integer", min: 0 },
+        { id: "fld_mcost", key: "cost", label: "Cost", type: "money" },
+        { id: "fld_mnotes", key: "notes", label: "Notes", type: "longtext" },
       ],
       workflow: {
-        initial: "st_draft",
+        initial: "st_mopen",
         states: [
-          { id: "st_draft", key: "draft", label: "Draft" },
-          { id: "st_conf", key: "confirmed", label: "Confirmed", tone: "info" },
-          { id: "st_done", key: "fulfilled", label: "Fulfilled", tone: "success", terminal: true },
+          { id: "st_mopen", key: "open", label: "Open", tone: "warning" },
+          { id: "st_mprog", key: "in_progress", label: "In progress", tone: "info" },
+          { id: "st_mdone", key: "done", label: "Done", tone: "success", terminal: true },
         ],
         transitions: [
-          { id: "tr_conf", key: "confirm", label: "Confirm", from: ["st_draft"], to: "st_conf", engineAction: "confirm" },
-          { id: "tr_done", key: "fulfil", label: "Mark fulfilled", from: ["st_conf"], to: "st_done" },
+          { id: "tr_mstart", key: "start", label: "Start", from: ["st_mopen"], to: "st_mprog" },
+          { id: "tr_mdone", key: "complete", label: "Complete", from: ["st_mprog"], to: "st_mdone", requires: ["fld_mdown"] },
         ],
       },
     },
+  ];
+
+  bp.rules = [
     {
-      id: "ent_job",
-      key: "production_job",
-      label: "Production job",
-      labelPlural: "Production jobs",
-      module: "mod_prod",
-      binding: "production.job",
-      titleField: "fld_jno",
-      numbering: { pattern: "JOB-{seq:5}" },
-      fields: [
-        { id: "fld_jno", key: "number", label: "Number", type: "text", readonly: true, engineOwned: true },
-        { id: "fld_jitem", key: "product", label: "Product", type: "ref", to: "ent_item", required: true, filterable: true },
-        { id: "fld_jqty", key: "planned_quantity", label: "Planned quantity", type: "quantity", unitFromItem: "fld_jitem", required: true },
-        { id: "fld_jmach", key: "machine", label: "Machine", type: "ref", to: "ent_machine", filterable: true },
-        { id: "fld_jsup", key: "supervisor", label: "Supervisor", type: "user" },
-      ],
-      stages: [
-        { id: "stg_mix", key: "mixing", label: "Mixing" },
-        { id: "stg_mould", key: "moulding", label: "Moulding", resource: "ent_machine", qc: [
-          { id: "qc_weight", key: "weight", label: "Part weight", type: "number", unit: "g", min: 48, max: 52, onFail: "block" },
-          { id: "qc_flash", key: "flash", label: "No flash", type: "boolean" },
-        ] },
-        { id: "stg_pack", key: "packing", label: "Packing", allowsScrap: false },
+      id: "rul_loyal", key: "loyal_discount", label: "5% for customers with 5 or more orders", target: "sales_order", on: ["create"],
+      when: "customer.order_count >= 5", then: { kind: "discount_percent", expr: "5" },
+    },
+    {
+      id: "rul_credit", key: "credit_hold", label: "No new orders for customers over 90 days overdue", target: "sales_order", on: ["confirm"],
+      when: "customer.days_overdue > 90", then: { kind: "reject", message: "This customer has invoices more than 90 days overdue." },
+    },
+    {
+      id: "rul_brkdn", key: "breakdown_alert", label: "Tell the supervisor about breakdowns", target: "ent_maint", on: ["create"],
+      when: "kind = 'breakdown'", then: { kind: "notify", roles: ["rol_supervisor", "rol_manager"], message: "Machine breakdown logged" },
+    },
+  ];
+
+  bp.approvals = [
+    ...(bp.approvals ?? []),
+    {
+      id: "apr_bigso", label: "Large sales orders", target: "sales_order", action: "confirm",
+      stages: [{ id: "aps_bigsoown", name: "Owner", minAmount: 5_000_000, roles: ["rol_owner"] }],
+    },
+    {
+      id: "apr_agentgrn", label: "Goods received by agents", target: "goods_receipt", action: "post", channels: ["mcp", "assistant"],
+      stages: [{ id: "aps_agentgrn", name: "Stores", roles: ["rol_stores", "rol_manager"] }],
+    },
+  ];
+
+  bp.views = [
+    ...(bp.views ?? []),
+    { id: "vw_maintboard", target: "ent_maint", label: "Board", type: "kanban", groupBy: "status", default: true },
+    { id: "vw_items", target: "item", label: "By resin", type: "table", columns: ["sku", "name", "resin_grade", "on_hand"], sort: { field: "name", dir: "asc" } },
+  ];
+
+  bp.roles = (bp.roles ?? []).map((r) =>
+    r.key === "supervisor"
+      ? { ...r, grants: [...r.grants, { target: "ent_maint", actions: ["view", "create", "edit"], scope: { kind: "own" as const, field: "technician" } }] }
+      : r,
+  );
+
+  bp.dashboard = [
+    ...(bp.dashboard ?? []),
+    { id: "wdg_downtime", label: "Breakdown downtime this month", source: { kind: "aggregate", target: "ent_maint", agg: "sum", field: "downtime_min", filter: "kind = 'breakdown'", period: "month" } },
+  ];
+
+  // Machines and moulds on the floor.
+  const seed = bp.seed ?? {};
+  bp.seed = {
+    ...seed,
+    production: {
+      ...seed.production,
+      resources: [
+        { code: "MOULDING", name: "Moulding hall", type: "work_centre", hoursPerDay: 22 },
+        { code: "IMM-01", name: "Haitian 250T", type: "machine", parent: "MOULDING", hourlyRate: 2_400, hoursPerDay: 22 },
+        { code: "IMM-02", name: "Haitian 160T", type: "machine", parent: "MOULDING", hourlyRate: 1_900, hoursPerDay: 22 },
+        { code: "IMM-03", name: "Engel 200T IML", type: "machine", parent: "MOULDING", hourlyRate: 2_800, hoursPerDay: 22 },
+        { code: "M-500RD", name: "500 ml round container mould (4 cav)", type: "mould" },
+        { code: "M-1LSQ", name: "1 L square container mould (2 cav)", type: "mould" },
+        { code: "M-LID95", name: "95 mm lid mould (8 cav)", type: "mould" },
+        { code: "OPERATOR", name: "Machine operator", type: "labour", hourlyRate: 450 },
+        { code: "GRANULATOR", name: "Granulator", type: "equipment" },
       ],
     },
-  ],
-  rules: [
-    { id: "rul_loyal", key: "loyal_discount", label: "Loyal customer discount", entity: "ent_order", on: ["create"],
-      when: "customer.order_count >= 5", then: { kind: "discount_percent", expr: "5" } },
-  ],
-  approvals: [
-    { id: "apr_bigso", key: "large_order", label: "Large sales orders", on: [{ entity: "ent_order", action: "confirm" }],
-      when: "record.total > 50000000", steps: [{ id: "aps_owner", roles: ["rol_owner"] }] },
-  ],
-  roles: [
-    { id: "rol_owner", key: "owner", label: "Owner", owner: true, canChangeSystem: true, permissions: [{ entity: "*", actions: ["read", "create", "update", "delete", "transition:*", "action:*"] }] },
-    { id: "rol_sup", key: "supervisor", label: "Supervisor", permissions: [
-      { entity: "ent_job", actions: ["read", "update", "action:complete_stage", "action:record_qc", "action:record_scrap"], scope: { kind: "own", field: "fld_jsup" } },
-      { entity: "ent_item", actions: ["read"] },
-    ] },
-  ],
-  views: [
-    { id: "vw_jobs", entity: "ent_job", label: "Floor", type: "kanban", groupBy: "stage", default: true },
-    { id: "vw_orders", entity: "ent_order", label: "Due", type: "calendar", dateField: "fld_odue" },
-  ],
-  documents: [{ id: "doc_card", key: "job_card", label: "Job card", entity: "ent_job", template: "job_card" }],
-  dashboard: [
-    { id: "wdg_scrap", source: { kind: "builtin", metric: "scrap_pct_by_resource" }, size: "md" },
-    { id: "wdg_late", source: { kind: "builtin", metric: "jobs_late" } },
-  ],
-};
+  };
+
+  return bp;
+}
+
+export const plasticsFactory: BlueprintInput = build();

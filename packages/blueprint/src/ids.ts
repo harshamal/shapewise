@@ -6,16 +6,16 @@ import { z } from "zod";
  * are metadata-only and never touch stored data.
  */
 export const ID_PREFIXES = {
+  /** Custom modules only; catalogue modules are addressed by their key. */
   module: "mod",
+  /** Custom record types (custom submodules). */
   entity: "ent",
   field: "fld",
   state: "st",
   transition: "tr",
-  stage: "stg",
-  qc: "qc",
   rule: "rul",
   approval: "apr",
-  approvalStep: "aps",
+  approvalStage: "aps",
   role: "rol",
   view: "vw",
   document: "doc",
@@ -36,11 +36,9 @@ export const EntityId = idOf("entity");
 export const FieldId = idOf("field");
 export const StateId = idOf("state");
 export const TransitionId = idOf("transition");
-export const StageId = idOf("stage");
-export const QcId = idOf("qc");
 export const RuleId = idOf("rule");
 export const ApprovalId = idOf("approval");
-export const ApprovalStepId = idOf("approvalStep");
+export const ApprovalStageId = idOf("approvalStage");
 export const RoleId = idOf("role");
 export const ViewId = idOf("view");
 export const DocumentId = idOf("document");

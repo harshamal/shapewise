@@ -1,9 +1,12 @@
 import { z } from "zod";
-import { BindingKey } from "./bindings";
-import { Field, Tone } from "./fields";
+import { PermAction } from "./catalogue/actions";
+import { ExtensionKey } from "./catalogue/extensions";
+import { CoreRecordKey } from "./catalogue/records";
+import { SECTIONS } from "./catalogue/modules";
+import { Field, ScalarField, Target, Tone } from "./fields";
 import {
   ApprovalId,
-  ApprovalStepId,
+  ApprovalStageId,
   DocumentId,
   EntityId,
   Expr,
@@ -11,50 +14,102 @@ import {
   Key,
   Label,
   ModuleId,
-  QcId,
   RoleId,
   RuleId,
-  StageId,
   StateId,
   TransitionId,
   ViewId,
   WidgetId,
 } from "./ids";
+import { Seed } from "./seed";
+import { NumberingPattern, Settings } from "./settings";
 
-export const SCHEMA_VERSION = 1 as const;
+/**
+ * Blueprint v2: a business's configuration of the fixed Shapewise catalogue
+ * (modules, submodules, core records and extensions, modelled on SyncBooks),
+ * plus the things the catalogue leaves open: custom fields, custom record
+ * types, rules, approvals, roles, views, documents and the dashboard.
+ *
+ * The blueprint never redefines a core record's lifecycle, postings or engine
+ * fields. That is what keeps money and stock correct whatever the AI generates.
+ */
+export const SCHEMA_VERSION = 2 as const;
+
+const SectionKey = z.enum(SECTIONS.map((s) => s.key) as [string, ...string[]]);
+
+/** A core field key ("total") or a custom field id ("fld_x7k2"). */
+export const FieldRef = Key;
 
 /* ------------------------------------------------------------------ business */
 
 export const Business = z.object({
   name: z.string().trim().min(1).max(120),
+  legalName: z.string().trim().max(160).optional(),
   /** ISO 4217, e.g. "LKR". */
   currency: z.string().regex(/^[A-Z]{3}$/),
+  /** ISO 3166-1 alpha-2. Drives tax and the chart of accounts. */
+  country: z.string().regex(/^[A-Z]{2}$/).default("LK"),
   /** BCP 47, e.g. "en-LK". */
   locale: z.string().min(2).max(35),
   /** IANA, e.g. "Asia/Colombo". */
   timezone: z.string().min(3).max(64),
-  /** Free-text industry, e.g. "plastic injection moulding". */
+  /** Free text, e.g. "plastic injection moulding". */
   industry: z.string().max(80).optional(),
   fiscalYearStartMonth: z.number().int().min(1).max(12).default(4),
+  tin: z.string().max(20).optional(),
+  vatNo: z.string().max(20).optional(),
+  brNo: z.string().max(20).optional(),
 });
 export type Business = z.infer<typeof Business>;
 
 /* ------------------------------------------------------------------- modules */
 
-export const Module = z.object({
+export const SubmoduleConfig = z.object({
+  /** Catalogue submodule key, e.g. "delivery_notes". */
+  key: Key,
+  enabled: z.boolean().optional(),
+  label: Label.optional(),
+  order: z.number().int().min(0).max(999).optional(),
+});
+
+export const ModuleConfig = z.object({
+  /** Catalogue module key, e.g. "production". */
+  key: Key,
+  enabled: z.boolean().default(true),
+  label: Label.optional(),
+  order: z.number().int().min(0).max(999).optional(),
+  /** Only submodules that differ from the catalogue defaults. */
+  submodules: z.array(SubmoduleConfig).max(40).default([]),
+});
+export type ModuleConfig = z.infer<typeof ModuleConfig>;
+
+/** A module the business adds for its own record types, e.g. "Fleet". */
+export const CustomModule = z.object({
   id: ModuleId,
   key: Key,
   label: Label,
-  /** Lucide icon name for the sidebar. */
+  section: SectionKey.default("operations"),
   icon: z.string().max(40).optional(),
-  /** Engine module this groups, if any; custom modules have none. */
-  engine: z.enum(["parties", "inventory", "production", "sales", "purchasing", "accounting"]).optional(),
-  enabled: z.boolean().default(true),
-  order: z.number().int().min(0).default(0),
+  order: z.number().int().min(0).max(999).optional(),
 });
-export type Module = z.infer<typeof Module>;
+export type CustomModule = z.infer<typeof CustomModule>;
 
-/* ------------------------------------------------------------------ workflow */
+/* ------------------------------------------------------------- custom fields */
+
+/** An extra field on a core record (needs the custom_fields extension). */
+export const CustomField = z.object({
+  target: CoreRecordKey,
+  /** On the document header, or on each line (carried along conversions). */
+  part: z.enum(["header", "line"]).default("header"),
+  field: ScalarField,
+  showOnDocuments: z.boolean().default(true),
+  /** Shown on production orders and batches made from this line. */
+  showInProduction: z.boolean().default(false),
+  order: z.number().int().min(0).max(999).optional(),
+});
+export type CustomField = z.infer<typeof CustomField>;
+
+/* ----------------------------------------------------- custom record types */
 
 export const WorkflowState = z.object({
   id: StateId,
@@ -71,74 +126,38 @@ export const Transition = z.object({
   label: Label,
   from: z.array(StateId).min(1),
   to: StateId,
-  /** Fields that must be filled before the transition is allowed. */
+  /** Permission needed on the record type. */
+  permission: PermAction.default("edit"),
+  /** Fields that must be filled first. */
   requires: z.array(FieldId).optional(),
-  /** Extra guard in the expression language. */
   when: Expr.optional(),
-  /** Engine action run with the transition, e.g. "post" on an invoice. */
-  engineAction: Key.optional(),
 });
 
 export const Workflow = z.object({
-  states: z.array(WorkflowState).min(2).max(30),
+  states: z.array(WorkflowState).min(2).max(20),
   initial: StateId,
-  transitions: z.array(Transition).max(60),
+  transitions: z.array(Transition).max(40),
 });
 export type Workflow = z.infer<typeof Workflow>;
 
-/* -------------------------------------------------------- production stages */
-
-export const QcCheck = z.object({
-  id: QcId,
-  key: Key,
-  label: Label,
-  type: z.enum(["number", "boolean", "select", "text"]),
-  unit: z.string().max(16).optional(),
-  min: z.number().optional(),
-  max: z.number().optional(),
-  options: z.array(z.string().max(60)).max(30).optional(),
-  required: z.boolean().default(true),
-  /** block: the stage can't complete; flag: completes but raises a QC issue. */
-  onFail: z.enum(["block", "flag"]).default("flag"),
-});
-export type QcCheck = z.infer<typeof QcCheck>;
-
-export const Stage = z.object({
-  id: StageId,
-  key: Key,
-  label: Label,
-  /** Resource entity (machine, line, oven) the stage runs on. */
-  resource: EntityId.optional(),
-  qc: z.array(QcCheck).max(40).optional(),
-  /** Scrap can be recorded at this stage. */
-  allowsScrap: z.boolean().default(true),
-});
-export type Stage = z.infer<typeof Stage>;
-
-/* ------------------------------------------------------------------- entity */
-
+/**
+ * A custom record type, shown as a submodule of a catalogue or custom module.
+ * Custom records never post to the ledger or stock; they link to core records
+ * through ref fields (a mould register referencing items and machines).
+ */
 export const Entity = z.object({
   id: EntityId,
   key: Key,
   label: Label,
   labelPlural: Label,
-  module: ModuleId,
+  /** Catalogue module key or custom module id. */
+  module: z.union([ModuleId, Key]),
   icon: z.string().max(40).optional(),
-  binding: BindingKey.optional(),
-  /** Field shown as the record's title in lists, links and search. */
   titleField: FieldId,
-  fields: z.array(Field).min(1).max(150),
+  fields: z.array(Field).min(1).max(120),
   workflow: Workflow.optional(),
-  /** Ordered production stages; only for production.job bindings. */
-  stages: z.array(Stage).max(30).optional(),
-  numbering: z
-    .object({
-      /** e.g. "INV-{yyyy}-{seq:5}" */
-      pattern: z.string().min(1).max(60),
-    })
-    .optional(),
-  /** Stock items: track lots and expiry. */
-  lots: z.object({ enabled: z.boolean(), expiry: z.boolean().default(false) }).optional(),
+  numbering: z.object({ pattern: NumberingPattern }).optional(),
+  order: z.number().int().min(0).max(999).optional(),
 });
 export type Entity = z.infer<typeof Entity>;
 
@@ -146,14 +165,14 @@ export type Entity = z.infer<typeof Entity>;
 
 export const RuleEffect = z.discriminatedUnion("kind", [
   /** Set a field to an expression's value. */
-  z.object({ kind: z.literal("set"), field: FieldId, expr: Expr }),
-  /** Reject the save with a message when `when` is true. */
+  z.object({ kind: z.literal("set"), field: FieldRef, expr: Expr }),
+  /** Refuse the save. */
   z.object({ kind: z.literal("reject"), message: z.string().min(1).max(200) }),
-  /** Warn but allow. */
+  /** Allow with a warning. */
   z.object({ kind: z.literal("warn"), message: z.string().min(1).max(200) }),
-  /** Apply a percentage discount to the document lines. */
+  /** Percentage discount on every line. */
   z.object({ kind: z.literal("discount_percent"), expr: Expr }),
-  /** Notify roles. */
+  /** Tell people in these roles. */
   z.object({ kind: z.literal("notify"), roles: z.array(RoleId).min(1), message: z.string().min(1).max(200) }),
 ]);
 
@@ -161,69 +180,62 @@ export const Rule = z.object({
   id: RuleId,
   key: Key,
   label: Label,
-  entity: EntityId,
-  on: z.array(z.enum(["create", "update", "transition"])).min(1),
+  target: Target,
+  /** create, update, or a lifecycle/workflow action key such as "post" or "dispatch". */
+  on: z.array(Key).min(1).max(10),
   when: Expr.optional(),
   then: RuleEffect,
   enabled: z.boolean().default(true),
-  /** Where the rule came from, e.g. "change:chg_19". */
+  /** Where it came from, e.g. "change:chg_19". */
   source: z.string().max(80).optional(),
 });
 export type Rule = z.infer<typeof Rule>;
 
 /* ---------------------------------------------------------------- approvals */
 
-/**
- * What an approval policy listens to. `entity` and `action` accept "*".
- * action is a workflow transition key, an engine action, or create/update/delete.
- */
-export const ActionPattern = z.object({
-  entity: z.union([EntityId, z.literal("*")]),
-  action: z.union([Key, z.literal("*")]),
+export const Channel = z.enum(["web", "assistant", "mcp", "import"]);
+
+/** One approval stage. Stages run in order; a stage is skipped below its minimum amount. */
+export const ApprovalStage = z.object({
+  id: ApprovalStageId,
+  name: Label,
+  /** In the business currency, major units. Stage applies at or above this. */
+  minAmount: z.number().min(0).default(0),
+  roles: z.array(RoleId).min(1).max(10),
+  /** One approver from each role, instead of any one. */
+  requireAll: z.boolean().default(false),
 });
 
-export const ApprovalStep = z.object({
-  id: ApprovalStepId,
-  label: Label.optional(),
-  roles: z.array(RoleId).min(1),
-  /** any: one approver from the roles is enough; all: one from each role. */
-  mode: z.enum(["any", "all"]).default("any"),
-});
-
+/** SyncBooks-style multi-stage approval on one action of one record type. */
 export const ApprovalPolicy = z.object({
   id: ApprovalId,
-  key: Key,
   label: Label,
-  on: z.array(ActionPattern).min(1),
-  /** Condition over the command input, record, actor and channel. Omit for always. */
+  target: Target,
+  /** Lifecycle or workflow action, e.g. "post", "issue", "confirm"; or create/update/delete. */
+  action: Key,
+  /** Extra condition; omit for always. */
   when: Expr.optional(),
-  /** Steps run in order. */
-  steps: z.array(ApprovalStep).min(1).max(5),
+  /** Only for these channels, e.g. hold MCP writes but not staff. Omit for all. */
+  channels: z.array(Channel).min(1).optional(),
+  stages: z.array(ApprovalStage).min(1).max(5),
   enabled: z.boolean().default(true),
 });
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicy>;
 
 /* -------------------------------------------------------------------- roles */
 
-export const PermissionAction = z.union([
-  z.enum(["read", "create", "update", "delete", "export"]),
-  /** "transition:mark_ready", "transition:*" */
-  z.string().regex(/^transition:(\*|[a-z][a-z0-9_]*)$/),
-  /** "action:post", "action:*" */
-  z.string().regex(/^action:(\*|[a-z][a-z0-9_]*)$/),
-]);
-
 export const RowScope = z.union([
   z.literal("all"),
-  /** Records the user created or is assigned to via a user field. */
-  z.object({ kind: z.literal("own"), field: FieldId.optional() }),
-  /** Any boolean expression; `$user` is the acting member. */
+  /** Records the person created or is named on through a user field. */
+  z.object({ kind: z.literal("own"), field: FieldRef.optional() }),
+  /** Any condition; `$user` is the person. */
   z.object({ kind: z.literal("expr"), expr: Expr }),
 ]);
 
-export const Permission = z.object({
-  entity: z.union([EntityId, z.literal("*")]),
-  actions: z.array(PermissionAction).min(1),
+export const Grant = z.object({
+  /** Submodule key ("invoices"), custom record type id, or "*" for everything. */
+  target: z.union([z.literal("*"), Key]),
+  actions: z.array(PermAction).min(1).max(8),
   scope: RowScope.default("all"),
 });
 
@@ -231,11 +243,12 @@ export const Role = z.object({
   id: RoleId,
   key: Key,
   label: Label,
+  description: z.string().max(200).optional(),
   /** Full access, including system changes and approvals. */
   owner: z.boolean().optional(),
-  /** May request blueprint changes in the change studio. */
+  /** May ask for blueprint changes in the change studio. */
   canChangeSystem: z.boolean().optional(),
-  permissions: z.array(Permission).max(200),
+  grants: z.array(Grant).max(200),
 });
 export type Role = z.infer<typeof Role>;
 
@@ -243,16 +256,18 @@ export type Role = z.infer<typeof Role>;
 
 export const View = z.object({
   id: ViewId,
-  entity: EntityId,
+  target: Target,
   label: Label,
-  type: z.enum(["table", "kanban", "calendar", "gallery"]),
-  columns: z.array(FieldId).max(20).optional(),
-  /** kanban: "status", "stage", or a select/ref field. */
-  groupBy: z.union([z.literal("status"), z.literal("stage"), FieldId]).optional(),
-  /** calendar: date or datetime field. */
-  dateField: FieldId.optional(),
+  type: z.enum(["table", "kanban", "calendar"]),
+  columns: z.array(FieldRef).max(20).optional(),
+  /** Kanban lanes: "status" or a select/ref field. */
+  groupBy: FieldRef.optional(),
+  /** Calendar: a date field. */
+  dateField: FieldRef.optional(),
   filter: Expr.optional(),
-  sort: z.object({ field: z.union([FieldId, z.literal("updated_at"), z.literal("created_at")]), dir: z.enum(["asc", "desc"]) }).optional(),
+  sort: z.object({ field: FieldRef, dir: z.enum(["asc", "desc"]) }).optional(),
+  /** Visible only to these roles; omit for everyone. */
+  roles: z.array(RoleId).optional(),
   default: z.boolean().optional(),
 });
 export type View = z.infer<typeof View>;
@@ -261,13 +276,14 @@ export type View = z.infer<typeof View>;
 
 export const DocumentTemplate = z.object({
   id: DocumentId,
-  key: Key,
+  record: CoreRecordKey,
   label: Label,
-  entity: EntityId,
-  template: z.enum(["invoice", "receipt", "delivery_note", "purchase_order", "grn", "job_card", "statement"]),
-  /** Extra fields printed on the document. */
-  extraFields: z.array(FieldId).max(12).optional(),
+  layout: z.enum(["standard", "compact", "ird_tax_invoice"]).default("standard"),
+  /** Extra fields printed under each line or in the header. */
+  extraFields: z.array(FieldRef).max(12).default([]),
+  showLots: z.boolean().default(false),
   footer: z.string().max(400).optional(),
+  default: z.boolean().default(true),
 });
 
 /* ---------------------------------------------------------------- dashboard */
@@ -277,16 +293,21 @@ export const BUILTIN_METRICS = [
   "receivables_overdue",
   "payables_due",
   "cash_position",
+  "orders_due_this_week",
+  "top_products",
+  "top_customers",
+  "stock_value",
+  "stock_below_reorder",
+  "lots_expiring",
   "jobs_in_progress",
   "jobs_late",
-  "scrap_pct",
-  "scrap_pct_by_resource",
   "yield_pct",
-  "stock_below_reorder",
-  "stock_value",
-  "top_products",
-  "orders_due_this_week",
+  "scrap_pct",
+  "scrap_pct_by_machine",
   "qc_failures",
+  "open_ncrs",
+  "capacity_load",
+  "pending_approvals",
 ] as const;
 
 export const Widget = z.object({
@@ -297,13 +318,14 @@ export const Widget = z.object({
     z.object({ kind: z.literal("builtin"), metric: z.enum(BUILTIN_METRICS) }),
     z.object({
       kind: z.literal("aggregate"),
-      entity: EntityId,
+      target: Target,
       agg: z.enum(["count", "sum", "avg"]),
-      field: FieldId.optional(),
+      field: FieldRef.optional(),
       filter: Expr.optional(),
       period: z.enum(["today", "week", "month", "quarter", "year", "all"]).default("month"),
     }),
   ]),
+  roles: z.array(RoleId).optional(),
 });
 export type Widget = z.infer<typeof Widget>;
 
@@ -313,19 +335,26 @@ export const LayerRef = z.object({ id: z.string().min(1).max(60), version: z.num
 
 export const Blueprint = z.object({
   schemaVersion: z.literal(SCHEMA_VERSION),
-  /** Version of this tenant's live blueprint; increments on every applied change. */
+  /** Increments on every applied change. */
   version: z.number().int().min(1),
-  base: LayerRef,
-  pack: LayerRef.optional(),
+  /** Industry preset this started from, e.g. { id: "plastics", version: 1 }. */
+  preset: LayerRef.optional(),
   business: Business,
-  modules: z.array(Module).min(1).max(40),
-  entities: z.array(Entity).min(1).max(120),
+  /** Catalogue modules. Modules left out are off. */
+  modules: z.array(ModuleConfig).min(1).max(30),
+  customModules: z.array(CustomModule).max(10).default([]),
+  extensions: z.array(ExtensionKey).max(40).default([]),
+  settings: Settings,
+  customFields: z.array(CustomField).max(200).default([]),
+  /** Custom record types. */
+  entities: z.array(Entity).max(60).default([]),
   rules: z.array(Rule).max(300).default([]),
   approvals: z.array(ApprovalPolicy).max(100).default([]),
   roles: z.array(Role).min(1).max(40),
   views: z.array(View).max(300).default([]),
-  documents: z.array(DocumentTemplate).max(40).default([]),
+  documents: z.array(DocumentTemplate).max(60).default([]),
   dashboard: z.array(Widget).max(24).default([]),
+  seed: Seed,
 });
 export type Blueprint = z.infer<typeof Blueprint>;
 export type BlueprintInput = z.input<typeof Blueprint>;

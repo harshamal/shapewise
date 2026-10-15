@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { EntityId, Expr, FieldId, Key, Label } from "./ids";
+import { CORE_RECORD_KEYS } from "./catalogue/records";
+
+/** A core record type ("customer") or a custom record type ("ent_x7k2"). */
+export const Target = z.union([z.enum(CORE_RECORD_KEYS), EntityId]);
+export type Target = z.infer<typeof Target>;
 
 /**
  * The field-type catalogue. The runtime, form renderer, import mapper and tool
@@ -32,6 +37,7 @@ export const FIELD_TYPES = [
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 export const Tone = z.enum(["neutral", "info", "success", "warning", "danger"]);
+export type Tone = z.infer<typeof Tone>;
 
 const fieldBase = {
   id: FieldId,
@@ -48,8 +54,6 @@ const fieldBase = {
   searchable: z.boolean().optional(),
   hidden: z.boolean().optional(),
   readonly: z.boolean().optional(),
-  /** Set by the engine a binding belongs to; the blueprint may relabel but not remove or retype it. */
-  engineOwned: z.boolean().optional(),
 };
 
 const SelectOption = z.object({
@@ -84,7 +88,7 @@ const DateTimeField = z.object({ ...fieldBase, type: z.literal("datetime") });
 const BooleanField = z.object({ ...fieldBase, type: z.literal("boolean") });
 const SelectField = z.object({ ...fieldBase, type: z.literal("select"), options: z.array(SelectOption).min(1).max(100) });
 const MultiSelectField = z.object({ ...fieldBase, type: z.literal("multiselect"), options: z.array(SelectOption).min(1).max(100) });
-const RefField = z.object({ ...fieldBase, type: z.literal("ref"), to: EntityId });
+const RefField = z.object({ ...fieldBase, type: z.literal("ref"), to: Target });
 /** A member of the business (staff user). */
 const UserField = z.object({ ...fieldBase, type: z.literal("user") });
 const PhoneField = z.object({ ...fieldBase, type: z.literal("phone") });
@@ -129,8 +133,8 @@ export type ScalarField = z.infer<typeof ScalarField>;
 const LinesField = z.object({
   ...fieldBase,
   type: z.literal("lines"),
-  /** The entity each line points at, usually an inventory item. */
-  item: EntityId.optional(),
+  /** The record each line points at, usually "item". */
+  item: Target.optional(),
   columns: z.array(ScalarField).min(1).max(30),
 });
 

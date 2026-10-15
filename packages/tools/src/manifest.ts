@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EntityId, Key } from "@shapewise/blueprint";
+import { Key, Target } from "@shapewise/blueprint";
 import type { CommandType } from "@shapewise/runtime";
 
 /**
@@ -22,10 +22,10 @@ export const TOOL_KINDS = [
   "create",
   "update",
   "delete",
-  /** Workflow transition, e.g. confirm_sales_order. */
-  "transition",
-  /** Engine action, e.g. receive_output_production_job. */
+  /** Lifecycle or workflow action, e.g. post_invoice, release_batch. */
   "action",
+  /** Conversion between core records, e.g. convert_quote_to_sales_order. */
+  "convert",
   /** Blueprint change request (always goes through preview + owner approval). */
   "change",
 ] as const;
@@ -44,9 +44,9 @@ export const ToolAnnotations = z.object({
 /** Where a write tool's arguments go in the command. */
 export const CommandTemplate = z.object({
   type: z.custom<CommandType>((v) => typeof v === "string"),
-  entity: EntityId.optional(),
-  /** transition id or engine action key the tool is bound to. */
-  target: z.string().max(64).optional(),
+  target: Target.optional(),
+  /** Action key, or the record type a conversion produces. */
+  action: z.string().max(64).optional(),
 });
 
 export const ToolDefinition = z.object({
@@ -56,11 +56,11 @@ export const ToolDefinition = z.object({
   /** JSON Schema (draft 2020-12) object for the arguments, keyed by field *key* for readability. */
   inputSchema: z.record(z.string(), z.unknown()),
   annotations: ToolAnnotations,
-  entity: EntityId.optional(),
+  target: Target.optional(),
   /** Absent for read tools. */
   command: CommandTemplate.optional(),
-  /** Permission the actor's role needs, e.g. "create" or "transition:confirm". */
-  requires: z.string().max(80),
+  /** Submodule (or custom record type) and permission the actor's role needs. */
+  requires: z.object({ target: z.string().max(64), action: z.string().max(16) }),
   /** The runtime will park this for approval for at least some inputs. */
   mayNeedApproval: z.boolean(),
 });
@@ -75,8 +75,8 @@ export const ToolManifest = z.object({
 export type ToolManifest = z.infer<typeof ToolManifest>;
 
 /**
- * Tool names are `<verb>_<entity key>`, e.g. list_sales_order, confirm_sales_order,
- * receive_output_production_job. Long names are truncated with a short hash so they
+ * Tool names are `<verb>_<record key>`, e.g. list_sales_order, confirm_sales_order,
+ * release_batch. Long names are truncated with a short hash so they
  * stay unique and within the MCP limit.
  */
 export function toolName(verb: string, entityKey?: string): ToolName {
