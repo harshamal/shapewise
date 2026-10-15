@@ -34,6 +34,8 @@ describe("catalogue", () => {
       for (const c of rec.children ?? []) expect(new Set(c.fields.map((f) => f.key)).size, `${rec.key}.${c.key} keys`).toBe(c.fields.length);
       for (const c of rec.convertsTo ?? []) expect(c.to in CORE_RECORDS).toBe(true);
       if (rec.amountField) expect(rec.fields.some((f) => f.key === rec.amountField), rec.key).toBe(true);
+      // Required fields must be fields people can fill in.
+      for (const f of [...rec.fields, ...(rec.lines?.fields ?? [])]) if (f.required) expect(f.system, `${rec.key}.${f.key} is required but system-set`).toBeFalsy();
       const lc = rec.lifecycle;
       if (!lc) continue;
       const states = new Set(lc.states.map((s) => s.key));

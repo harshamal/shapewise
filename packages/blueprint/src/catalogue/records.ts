@@ -78,6 +78,8 @@ export interface CoreField {
   options?: readonly string[];
   /** Indexed for filters and sorting in every tenant. */
   indexed?: boolean;
+  /** Must be filled in to save. */
+  required?: boolean;
   /** Set by the engine; never typed by a person. */
   system?: boolean;
 }
@@ -216,7 +218,7 @@ const activeArchived: Lifecycle = {
 
 /* --------------------------------------------------------------- catalogue */
 
-export const CORE_RECORDS: Record<CoreRecordKey, CoreRecord> = {
+const RAW_RECORDS: Record<CoreRecordKey, CoreRecord> = {
   /* parties and masters */
   customer: {
     key: "customer", label: "Customer", labelPlural: "Customers",
@@ -746,6 +748,77 @@ export const CORE_RECORDS: Record<CoreRecordKey, CoreRecord> = {
     customFields: [], printable: true,
   },
 };
+
+/**
+ * Fields that must be filled in to save, by record: header keys, and line
+ * keys after "lines.". Kept apart from the shapes above so the shared field
+ * helpers stay simple.
+ */
+const REQUIRED: Partial<Record<CoreRecordKey, readonly string[]>> = {
+  customer: ["name"],
+  vendor: ["name"],
+  salesperson: ["name"],
+  item: ["name", "type"],
+  warehouse: ["code", "name"],
+  price_list: ["name"],
+  quote: ["customer", "date", "lines.quantity"],
+  sales_order: ["customer", "date", "lines.item", "lines.quantity"],
+  delivery_note: ["customer", "date", "warehouse", "lines.item", "lines.quantity"],
+  invoice: ["customer", "date", "lines.quantity", "lines.unit_price"],
+  receipt: ["customer", "date", "amount", "deposit_to"],
+  credit_note: ["customer", "date", "lines.quantity", "lines.unit_price"],
+  recurring_invoice: ["customer", "frequency", "next_run"],
+  purchase_order: ["vendor", "date", "lines.item", "lines.quantity"],
+  goods_receipt: ["vendor", "date", "warehouse", "lines.item", "lines.quantity"],
+  bill: ["vendor", "date", "lines.quantity", "lines.unit_price"],
+  payment: ["vendor", "date", "amount", "paid_from"],
+  vendor_credit: ["vendor", "date", "lines.quantity", "lines.unit_price"],
+  vendor_advance: ["vendor", "date", "amount", "paid_from"],
+  expense: ["date", "account", "amount", "paid_from"],
+  recurring_bill: ["vendor", "frequency", "next_run"],
+  supplier_certificate: ["vendor", "name"],
+  stock_adjustment: ["date", "warehouse", "reason", "lines.item", "lines.quantity_delta"],
+  stock_transfer: ["date", "from_warehouse", "to_warehouse", "lines.item", "lines.quantity"],
+  lot: ["lot_no", "item"],
+  resource: ["code", "name", "type"],
+  recipe: ["code", "name", "item", "output_quantity", "lines.item"],
+  production_order: ["recipe", "item", "planned_quantity"],
+  batch: ["production_order", "planned_quantity"],
+  inspection: ["item"],
+  ncr: ["source", "description"],
+  artwork: ["name", "item"],
+  bank_account: ["name", "kind"],
+  cheque: ["direction", "cheque_no", "cheque_date", "amount"],
+  account: ["code", "name", "type"],
+  journal: ["date", "narration", "lines.account"],
+  recurring_journal: ["narration", "frequency"],
+  budget: ["name", "fiscal_year"],
+  fixed_asset: ["name", "acquired_on", "cost", "method", "useful_life_months"],
+  tax_code: ["name", "rate", "kind"],
+  vat_return: ["period"],
+};
+
+function withRequired(records: Record<CoreRecordKey, CoreRecord>): Record<CoreRecordKey, CoreRecord> {
+  const out = {} as Record<CoreRecordKey, CoreRecord>;
+  for (const [key, rec] of Object.entries(records) as [CoreRecordKey, CoreRecord][]) {
+    const req = new Set(REQUIRED[key] ?? []);
+    const mark = (prefix: string) => (f: CoreField) => (req.has(prefix + f.key) ? { ...f, required: true } : f);
+    out[key] = {
+      ...rec,
+      fields: rec.fields.map(mark("")),
+      lines: rec.lines ? { ...rec.lines, fields: rec.lines.fields.map(mark("lines.")) } : undefined,
+    };
+  }
+  return out;
+}
+
+export const CORE_RECORDS: Record<CoreRecordKey, CoreRecord> = withRequired(RAW_RECORDS);
+
+/** The field shown as a record's name in lists, links and pickers. */
+export function titleFieldOf(key: CoreRecordKey): string {
+  const keys = new Set(CORE_RECORDS[key].fields.map((f) => f.key));
+  return ["number", "name", "code", "lot_no", "cheque_no", "certificate_no", "period", "narration", "check"].find((k) => keys.has(k)) ?? CORE_RECORDS[key].fields[0]!.key;
+}
 
 export function coreRecord(key: CoreRecordKey): CoreRecord {
   return CORE_RECORDS[key];
