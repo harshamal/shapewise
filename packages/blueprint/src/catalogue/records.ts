@@ -108,6 +108,13 @@ export interface Lifecycle {
   actions: readonly LifecycleAction[];
 }
 
+export interface ChildList {
+  key: string;
+  label: string;
+  fields: readonly CoreField[];
+  setting?: "useOperations" | "useOutputs";
+}
+
 export interface CoreRecord {
   key: CoreRecordKey;
   label: string;
@@ -116,6 +123,12 @@ export interface CoreRecord {
   numbering?: string;
   fields: readonly CoreField[];
   lines?: { label: string; fields: readonly CoreField[] };
+  /**
+   * Further child lists, e.g. a recipe's operations and outputs. `setting`
+   * names the production setting that shows the list (SyncBooks hides
+   * routing and outputs unless the business switches them on).
+   */
+  children?: readonly ChildList[];
   lifecycle?: Lifecycle;
   /** Payment progress tracked separately from the lifecycle (unpaid → partly paid → paid, overdue). */
   paymentStatus?: boolean;
@@ -165,6 +178,15 @@ const stockLines = {
   fields: [ref("item", "Item", "item"), f("quantity", "Quantity", "quantity"), ref("lot", "Lot", "lot"), f("unit_cost", "Unit cost", "money")],
 } as const;
 
+/** A routing step, shared by recipes (planned) and batches (planned + actual). */
+const operationFields: readonly CoreField[] = [
+  f("seq", "Step", "integer"), f("name", "Operation", "text"), f("operation_type", "Type", "text"),
+  ref("work_centre", "Work centre", "resource", { indexed: false }), ref("machine", "Machine", "resource", { indexed: false }),
+  ref("tool", "Mould or tool", "resource", { indexed: false }), ref("labour", "Labour", "resource", { indexed: false }),
+  f("labour_count", "People", "decimal"), f("setup_minutes", "Setup (min)", "decimal"), f("run_minutes", "Run (min per run)", "decimal"),
+  f("instructions", "Instructions", "longtext"), f("qc_required", "QC after this step", "boolean"),
+];
+
 /* ------------------------------------------------------------- lifecycles */
 
 const S = (key: string, label: string, tone: Tone = "neutral"): LifecycleState => ({ key, label, tone });
@@ -203,6 +225,7 @@ export const CORE_RECORDS: Record<CoreRecordKey, CoreRecord> = {
       f("email", "Email", "email"), f("phone", "Phone", "phone", { indexed: true }), f("payment_terms_days", "Payment terms (days)", "integer"),
       f("credit_limit", "Credit limit", "money"), ref("price_list", "Price list", "price_list"), ref("salesperson", "Salesperson", "salesperson"),
       f("balance", "Balance", "money", { system: true, indexed: true }),
+      f("order_count", "Orders", "integer", { system: true }), f("days_overdue", "Days overdue", "integer", { system: true }),
     ],
     lifecycle: activeArchived, customFields: ["header"],
   },
@@ -494,6 +517,24 @@ export const CORE_RECORDS: Record<CoreRecordKey, CoreRecord> = {
       f("output_quantity", "Output per run", "quantity"), f("expected_yield_pct", "Expected yield", "percent"), f("mix_mode", "Inputs as % of mix", "boolean"),
     ],
     lines: { label: "Inputs", fields: [ref("item", "Material", "item"), f("quantity", "Quantity", "quantity"), f("mix_pct", "% of mix", "percent"), f("scrap_pct", "Scrap allowance", "percent")] },
+    children: [
+      { key: "operations", label: "Operations", setting: "useOperations", fields: operationFields },
+      {
+        key: "operation_params", label: "Process parameters", setting: "useOperations",
+        fields: [
+          f("operation_seq", "Step", "integer"), f("parameter", "Parameter", "text"), f("name", "Name", "text"),
+          f("data_type", "Kind", "select", { options: ["number", "text", "boolean", "choice"] }), f("unit", "Unit", "text"),
+          f("min", "Min", "decimal"), f("target", "Target", "decimal"), f("max", "Max", "decimal"), f("target_text", "Target (text)", "text"),
+        ],
+      },
+      {
+        key: "outputs", label: "Co-products, by-products and regrind", setting: "useOutputs",
+        fields: [
+          ref("item", "Item", "item"), f("output_type", "Kind", "select", { options: ["co_product", "by_product", "regrind"] }), f("quantity", "Per run", "quantity"),
+          f("costing", "Costing", "select", { options: ["share", "credit"] }), f("cost_share_pct", "Cost share", "percent"),
+        ],
+      },
+    ],
     lifecycle: {
       initial: "draft",
       states: [draft, S("active", "Active", "success"), S("archived", "Archived")],
@@ -531,6 +572,29 @@ export const CORE_RECORDS: Record<CoreRecordKey, CoreRecord> = {
       number, ref("production_order", "Production order", "production_order"), ref("machine", "Machine", "resource"), ref("operator", "Operator", "user"),
       f("planned_quantity", "Planned", "quantity"), f("output_quantity", "Good output", "quantity"), f("scrap_quantity", "Scrap", "quantity"),
       f("mfg_date", "Made", "date", { indexed: true }), f("expiry_date", "Expiry", "date"), f("material_cost", "Material cost", "money", { system: true }), f("unit_cost", "Cost per unit", "money", { system: true }),
+    ],
+    lines: { label: "Materials issued", fields: [ref("item", "Material", "item"), ref("lot", "Lot", "lot"), f("planned_qty", "Planned", "quantity", { system: true }), f("quantity", "Issued", "quantity"), f("unit_cost", "Unit cost", "money", { system: true })] },
+    children: [
+      {
+        key: "operations", label: "Operations", setting: "useOperations",
+        fields: [
+          ...operationFields,
+          f("actual_setup_minutes", "Actual setup (min)", "decimal"), f("actual_run_minutes", "Actual run (min)", "decimal"), f("downtime_minutes", "Downtime (min)", "decimal"),
+          ref("operator", "Operator", "user"), f("status", "Status", "select", { options: ["pending", "done", "skipped"] }), f("cost", "Cost", "money", { system: true }),
+        ],
+      },
+      {
+        key: "readings", label: "Process readings", setting: "useOperations",
+        fields: [f("operation_seq", "Step", "integer"), f("parameter", "Parameter", "text"), f("value", "Reading", "text"), f("within_limits", "Within limits", "boolean", { system: true })],
+      },
+      {
+        key: "outputs", label: "Other outputs", setting: "useOutputs",
+        fields: [ref("item", "Item", "item"), f("output_type", "Kind", "select", { options: ["co_product", "by_product", "regrind"] }), f("quantity", "Quantity", "quantity"), ref("lot", "Lot", "lot", { system: true })],
+      },
+      {
+        key: "qc_results", label: "QC results",
+        fields: [f("check", "Check", "text"), f("value", "Result", "text"), f("passed", "Passed", "boolean", { system: true }), ref("checked_by", "Checked by", "user")],
+      },
     ],
     lifecycle: {
       initial: "draft",

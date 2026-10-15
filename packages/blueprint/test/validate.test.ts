@@ -119,6 +119,24 @@ describe("validator catches", () => {
     expectError(bp, `views.${bp.views!.length - 1}.id`, /already used/);
   });
 
+  it("rule conditions on fields that don't exist, with a suggestion", () => {
+    const bp = base();
+    bp.rules!.find((r) => r.id === "rul_loyal")!.when = "customer.order_cnt >= 5";
+    expectError(bp, `rules.${bp.rules!.findIndex((r) => r.id === "rul_loyal")}.when`, /Did you mean "order_count"/);
+  });
+
+  it("status values that aren't in the lifecycle", () => {
+    const bp = base();
+    bp.views!.find((v) => v.id === "vw_batchhold")!.filter = "status = 'on_hold'";
+    expectError(bp, `views.${bp.views!.findIndex((v) => v.id === "vw_batchhold")}.filter`, /isn't one of the options.*qc_hold/);
+  });
+
+  it("conditions that aren't yes/no", () => {
+    const bp = base();
+    bp.approvals!.find((a) => a.id === "apr_bigso")!.when = "amount + 1";
+    expectError(bp, `approvals.${bp.approvals!.findIndex((a) => a.id === "apr_bigso")}.when`, /should give yes\/no/);
+  });
+
   it("seed data pointing at unknown codes", () => {
     const bp = base();
     bp.seed!.production!.resources!.push({ code: "IMM-09", name: "Ghost", type: "machine", parent: "NOWHERE" });

@@ -12,6 +12,7 @@ export * from "./overlay";
 export * from "./validate";
 export * from "./presets";
 export * from "./navigation";
+export * from "./expr";
 
 /** JSON Schema for Gemini structured output when generating a whole blueprint. */
 export function blueprintJsonSchema() {

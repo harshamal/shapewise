@@ -29,7 +29,9 @@ describe("catalogue", () => {
     for (const s of SUBMODULE_BY_KEY.values()) if (s.extension) expect(extKeys.has(s.extension), s.key).toBe(true);
     for (const e of EXTENSIONS) for (const r of e.requires) expect(extKeys.has(r), `${e.key} requires ${r}`).toBe(true);
     for (const rec of Object.values(CORE_RECORDS)) {
-      for (const f of [...rec.fields, ...(rec.lines?.fields ?? [])]) if (f.to && f.to !== "user") expect(f.to in CORE_RECORDS, `${rec.key}.${f.key}`).toBe(true);
+      const all = [...rec.fields, ...(rec.lines?.fields ?? []), ...(rec.children ?? []).flatMap((c) => c.fields)];
+      for (const f of all) if (f.to && f.to !== "user") expect(f.to in CORE_RECORDS, `${rec.key}.${f.key}`).toBe(true);
+      for (const c of rec.children ?? []) expect(new Set(c.fields.map((f) => f.key)).size, `${rec.key}.${c.key} keys`).toBe(c.fields.length);
       for (const c of rec.convertsTo ?? []) expect(c.to in CORE_RECORDS).toBe(true);
       if (rec.amountField) expect(rec.fields.some((f) => f.key === rec.amountField), rec.key).toBe(true);
       const lc = rec.lifecycle;

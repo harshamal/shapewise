@@ -1,7 +1,9 @@
 import type { PermAction } from "./catalogue/actions";
 import { EXTENSION_BY_KEY, type ExtensionKey } from "./catalogue/extensions";
 import { MODULE_BY_KEY, SUBMODULE_BY_KEY, SUBMODULE_FOR_RECORD, SUBMODULE_NEEDS_MODULE } from "./catalogue/modules";
+import { CHART_TEMPLATES, requiredRoles } from "./catalogue/accounts";
 import { CORE_RECORDS, type CoreRecordKey } from "./catalogue/records";
+import { checkExpr, fieldExprType, type ExprType } from "./expr";
 import type { Field, FieldType } from "./fields";
 import { Blueprint, type BlueprintInput, type Entity } from "./schema";
 
@@ -96,6 +98,35 @@ export class Resolved {
         out.set(f.key, { type, system: f.type === "computed" || f.readonly });
         out.set(f.id, { type });
       }
+    }
+    return out;
+  }
+
+  /** Fields of a target as expression types, including select options and lifecycle statuses. */
+  exprFields(target: string): ReadonlyMap<string, ExprType> | undefined {
+    if (!this.isTarget(target)) return undefined;
+    const out = new Map<string, ExprType>([
+      ["id", { t: "text" }],
+      ["created_at", { t: "datetime" }],
+      ["updated_at", { t: "datetime" }],
+      ["created_by", { t: "user" }],
+    ]);
+    const add = (f: Field) => {
+      const opts = f.type === "select" || f.type === "multiselect" ? f.options.map((o) => o.value) : undefined;
+      const type = f.type === "computed" ? fieldExprType(f.resultType) : fieldExprType(f.type, { to: f.type === "ref" ? f.to : undefined, options: opts });
+      out.set(f.key, type);
+      out.set(f.id, type);
+    };
+    if (target in CORE_RECORDS) {
+      const rec = CORE_RECORDS[target as CoreRecordKey];
+      out.set("status", { t: "text", options: rec.lifecycle?.states.map((s) => s.key) });
+      for (const f of rec.fields) out.set(f.key, fieldExprType(f.type, { to: f.to, options: f.options }));
+      if (rec.paymentStatus) out.set("payment_status", { t: "text", options: ["unpaid", "partly_paid", "paid", "overdue"] });
+      for (const cf of this.bp.customFields) if (cf.target === target && cf.part === "header") add(cf.field);
+    } else {
+      const e = this.entities.get(target)!;
+      out.set("status", { t: "text", options: e.workflow?.states.map((s) => s.key) });
+      for (const f of e.fields) add(f);
     }
     return out;
   }
@@ -318,6 +349,64 @@ export function checkBlueprint(bp: Blueprint): Issue[] {
       else if (!NUMERIC.includes(f.type)) err([...p, "field"], `"${w.source.field}" isn't a number field.`);
     }
   });
+
+  /* expressions */
+  const USER: ExprType = { t: "user" };
+  const CHANNEL: ExprType = { t: "text", options: ["web", "assistant", "mcp", "import", "system"] };
+  const env = (target: string | undefined, extra: Record<string, ExprType> = {}) => ({
+    target,
+    fields: (t: string) => r.exprFields(t),
+    vars: { $user: USER, channel: CHANNEL, ...extra },
+  });
+  const expr = (src: string | undefined, path: Issue["path"], target: string | undefined, expect?: ExprType["t"], extra?: Record<string, ExprType>) => {
+    if (!src) return;
+    if (target && !r.isTarget(target)) return; // already reported
+    for (const p of checkExpr(src, env(target, extra), expect).problems) {
+      err(path, p.at > 0 ? `${p.message} (at "${src.slice(p.at, p.at + 20)}")` : p.message);
+    }
+  };
+  const resultExpect = (t: string): ExprType["t"] => (["integer", "decimal", "money", "quantity", "percent"].includes(t) ? "number" : (t as ExprType["t"]));
+
+  bp.rules.forEach((rule, i) => {
+    expr(rule.when, ["rules", i, "when"], rule.target, "boolean");
+    const t = rule.then;
+    if (t.kind === "set") {
+      const f = r.exprFields(rule.target)?.get(t.field);
+      expr(t.expr, ["rules", i, "then", "expr"], rule.target, f && f.t !== "any" && f.t !== "list" && f.t !== "ref" && f.t !== "null" ? f.t : undefined);
+    }
+    if (t.kind === "discount_percent") expr(t.expr, ["rules", i, "then", "expr"], rule.target, "number");
+  });
+  bp.approvals.forEach((a, i) => expr(a.when, ["approvals", i, "when"], a.target, "boolean", { amount: { t: "number" } }));
+  bp.views.forEach((v, i) => expr(v.filter, ["views", i, "filter"], v.target, "boolean"));
+  bp.dashboard.forEach((w, i) => w.source.kind === "aggregate" && expr(w.source.filter, ["dashboard", i, "source", "filter"], w.source.target, "boolean"));
+  bp.entities.forEach((e, i) => {
+    e.workflow?.transitions.forEach((t, j) => expr(t.when, ["entities", i, "workflow", "transitions", j, "when"], e.id, "boolean"));
+    e.fields.forEach((f, j) => f.type === "computed" && expr(f.expr, ["entities", i, "fields", j, "expr"], e.id, resultExpect(f.resultType)));
+  });
+  bp.customFields.forEach((c, i) => c.field.type === "computed" && expr(c.field.expr, ["customFields", i, "field", "expr"], c.target, resultExpect(c.field.resultType)));
+  bp.roles.forEach((role, i) =>
+    role.grants.forEach((g, j) => {
+      if (typeof g.scope !== "object" || g.scope.kind !== "expr") return;
+      const target = r.entities.has(g.target) ? g.target : (bp.entities.find((e) => e.key === g.target)?.id ?? SUBMODULE_BY_KEY.get(g.target)?.record);
+      expr(g.scope.expr, ["roles", i, "grants", j, "scope", "expr"], target, "boolean");
+    }),
+  );
+
+  /* chart of accounts */
+  const chart = bp.settings.accounting.chartTemplate;
+  const accountsByRole = new Set(CHART_TEMPLATES[chart].accounts.flatMap((a) => (a.role ? [a.role] : [])));
+  const missingRoles = requiredRoles({
+    inventory: r.modules.has("inventory"),
+    production: r.modules.has("production"),
+    tax: { vat: bp.settings.tax.vatRegistered, sscl: bp.settings.tax.ssclRegistered, wht: bp.settings.tax.wht },
+  }).filter((role) => !accountsByRole.has(role));
+  if (missingRoles.length) {
+    const better = (Object.keys(CHART_TEMPLATES) as (keyof typeof CHART_TEMPLATES)[]).find((k) => {
+      const roles = new Set(CHART_TEMPLATES[k].accounts.flatMap((a) => (a.role ? [a.role] : [])));
+      return missingRoles.every((m) => roles.has(m));
+    });
+    err(["settings", "accounting", "chartTemplate"], `The ${CHART_TEMPLATES[chart].label.toLowerCase()} chart has no account for ${missingRoles.join(", ")}.${better ? ` Use "${better}".` : ""}`);
+  }
 
   /* settings */
   dupKeys(bp.settings.general.numbering.map((n) => n.record), (k, i) => err(["settings", "general", "numbering", i, "record"], `Numbering for "${k}" is set twice.`));
