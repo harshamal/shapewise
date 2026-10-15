@@ -12,7 +12,7 @@ interface Column {
 
 export default async function SubmodulePage({ params }: { params: Promise<{ tenant: string; module: string; submodule: string }> }) {
   const { tenant, module, submodule } = await params;
-  const { bp, sections, base } = await loadWorkspace(tenant);
+  const { bp, sections, base, viewer } = await loadWorkspace(tenant);
   const found = findNav(sections, module, submodule);
   if (!found?.submodule) notFound();
   const { submodule: sub } = found;
@@ -23,6 +23,7 @@ export default async function SubmodulePage({ params }: { params: Promise<{ tena
     <WorkspaceShell
       base={base}
       workspaceName={bp.business.name}
+      viewer={viewer}
       sections={sections}
       title={sub.label}
       actions={shape?.creatable ? <Button variant="primary" size="sm">New {shape.singular.toLowerCase()}</Button> : undefined}

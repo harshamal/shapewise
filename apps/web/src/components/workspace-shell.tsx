@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import type { NavSection } from "@shapewise/blueprint";
 import { cx } from "@shapewise/ui";
+import { AccountMenu } from "./account-menu";
 
 /**
  * Workspace frame: a dark warm-grey rail (brand, sections → modules →
@@ -13,6 +14,7 @@ import { cx } from "@shapewise/ui";
 export function WorkspaceShell({
   base,
   workspaceName,
+  viewer,
   sections,
   title,
   actions,
@@ -21,6 +23,7 @@ export function WorkspaceShell({
   /** /w/{tenant} */
   base: string;
   workspaceName: string;
+  viewer: { name: string; role: string | null } | null;
   sections: NavSection[];
   title: string;
   actions?: ReactNode;
@@ -79,7 +82,10 @@ export function WorkspaceShell({
           ))}
         </nav>
 
-        <div className="border-t border-white/10 px-5 py-3 text-sm text-rail-muted">{workspaceName}</div>
+        <div className="space-y-1 border-t border-white/10 px-5 py-3 text-sm">
+          <p className="truncate text-rail-muted">{workspaceName}</p>
+          <AccountMenu viewer={viewer} here={pathname} />
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-col">
