@@ -36,7 +36,11 @@ export async function POST(req: NextRequest) {
     return res;
   } catch (e) {
     const code = (e as { code?: string }).code ?? "";
-    if (code.startsWith("auth/")) return NextResponse.json({ error: "Sign-in could not be verified" }, { status: 401 });
+    if (code.startsWith("auth/")) {
+      // Never log the token; the code and message say why it was refused.
+      console.warn(`session: token refused (${code}): ${(e as Error).message}`);
+      return NextResponse.json({ error: "Sign-in could not be verified" }, { status: 401 });
+    }
     console.error("session: could not create session cookie", e);
     return NextResponse.json({ error: "Sign-in is not available right now" }, { status: 503 });
   }
