@@ -71,8 +71,58 @@
     outline: 2px solid var(--sw-focus);
     outline-offset: 2px;
   }
+
+  /* Global slim & minimal scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sw-border-strong) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--sw-border-strong);
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--sw-ink-faint);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Dark rail scrollbar styling */
+  .bg-rail,
+  .bg-rail * {
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+
+  .bg-rail *::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.16);
+  }
+
+  .bg-rail *::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.28);
+  }
 }
 
 @utility tabular {
   font-variant-numeric: tabular-nums;
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }

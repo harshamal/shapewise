@@ -69,6 +69,8 @@ export interface AuditEntry {
 export interface ReadTx {
   get(target: string, id: string): Promise<StoredRecord | undefined>;
   list(target: string): Promise<StoredRecord[]>;
+  /** Any one record that references this id (for "can't delete, it's in use"). */
+  referencedBy(id: string): Promise<StoredRecord | undefined>;
   getApproval(id: string): Promise<ApprovalDoc | undefined>;
 }
 
@@ -184,6 +186,10 @@ function readTx(s: TenantState): ReadTx {
     },
     async list(target) {
       return [...(s.records.get(target)?.values() ?? [])].map((r) => structuredClone(r));
+    },
+    async referencedBy(id) {
+      for (const m of s.records.values()) for (const r of m.values()) if (r.links.includes(id)) return structuredClone(r);
+      return undefined;
     },
     async getApproval(id) {
       const a = s.approvals.get(id);

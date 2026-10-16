@@ -57,6 +57,7 @@ export function buildIndexes() {
   const other = (group: string, ...fields: IndexField[]): Index => ({ collectionGroup: group, queryScope: "COLLECTION", fields });
   indexes.push(other("approvals", asc("status"), desc("createdAt")));
   indexes.push(other("audit", asc("recordId"), desc("at")));
+  indexes.push(other("audit", asc("target"), desc("at")));
   indexes.push(other("audit", asc("actor.id"), desc("at")));
   indexes.push(other("stockMoves", asc("itemId"), desc("at")));
   indexes.push(other("journal", asc("accountIds"), desc("date")));

@@ -36,6 +36,8 @@ export const TENANT_COLLECTIONS = [
   "changes",
   "jobs",
   "outbox",
+  /** Idempotency results, keyed by a hash of actor + idempotency key. */
+  "results",
 ] as const;
 export type TenantCollection = (typeof TENANT_COLLECTIONS)[number];
 
@@ -76,6 +78,9 @@ export const mcpTokenPath = (sha256Hex: string) => {
   if (!/^[a-f0-9]{64}$/.test(sha256Hex)) throw new InvalidPathSegment(sha256Hex);
   return `mcpTokens/${sha256Hex}`;
 };
+
+/** users/{uid}: the workspaces a person belongs to, for the home screen. Server only. */
+export const userPath = (uid: string) => `users/${assertDocId(uid)}`;
 
 /** Blueprint docs are keyed by zero-padded version so they sort lexically. */
 export const blueprintDocId = (version: number) => String(version).padStart(6, "0");

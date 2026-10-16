@@ -2,7 +2,7 @@ import "server-only";
 import { notFound } from "next/navigation";
 import { findNav } from "@shapewise/blueprint";
 import { deletable, editable, titleOf, type CField, type CTarget, type StoredRecord } from "@shapewise/runtime";
-import { store, type Workspace } from "./workspace";
+import type { Workspace } from "./workspace";
 import { toInput, type FieldSpec, type FormSpec, type RefTitles } from "./format";
 
 /** The record type behind a module/submodule URL, or 404. */
@@ -26,12 +26,12 @@ export function formSpec(ws: Workspace, t: CTarget): FormSpec {
 }
 
 export async function listRecords(ws: Workspace, t: CTarget): Promise<StoredRecord[]> {
-  const rows = await store.read(ws.tenant, (tx) => tx.list(t.target));
+  const rows = await ws.store.read(ws.tenant, (tx) => tx.list(t.target));
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function getRecord(ws: Workspace, t: CTarget, id: string): Promise<StoredRecord> {
-  const rec = await store.read(ws.tenant, (tx) => tx.get(t.target, id));
+  const rec = await ws.store.read(ws.tenant, (tx) => tx.get(t.target, id));
   if (!rec) notFound();
   return rec;
 }
@@ -52,7 +52,7 @@ export async function refOptions(ws: Workspace, t: CTarget) {
       out[target] = [];
       continue;
     }
-    const rows = await store.read(ws.tenant, (tx) => tx.list(target));
+    const rows = await ws.store.read(ws.tenant, (tx) => tx.list(target));
     out[target] = rows
       .filter((r) => !["archived", "void", "cancelled"].includes(r.status ?? ""))
       .map((r) => ({ value: r.id, label: titleOf(rt, r) }))
@@ -65,7 +65,7 @@ export async function refOptions(ws: Workspace, t: CTarget) {
 export async function refTitles(ws: Workspace, t: CTarget, recs: StoredRecord[]): Promise<RefTitles> {
   const titles: RefTitles = {};
   const fields = [...t.fields, ...(t.lines?.fields ?? []), ...t.children.flatMap((c) => c.fields)].filter((f) => f.type === "ref" && f.to && f.to !== "user");
-  await store.read(ws.tenant, async (tx) => {
+  await ws.store.read(ws.tenant, async (tx) => {
     for (const rec of recs) {
       const values: [CField, unknown][] = [];
       for (const f of t.fields) values.push([f, rec.data[f.key]]);

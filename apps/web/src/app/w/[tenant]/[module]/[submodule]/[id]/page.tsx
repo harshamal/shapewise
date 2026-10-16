@@ -6,7 +6,7 @@ import { RecordActions } from "@/components/record-actions";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { formatValue, isNumeric, type RefTitles } from "@/lib/format";
 import { abilities, getRecord, refTitles, spec, targetFor } from "@/lib/records";
-import { loadWorkspace, store, shellProps } from "@/lib/workspace";
+import { loadWorkspace, shellProps } from "@/lib/workspace";
 
 export default async function RecordDetail({
   params,
@@ -26,7 +26,7 @@ export default async function RecordDetail({
   const here = `${ws.base}/${module}/${submodule}`;
   const ctx = { currency: ws.bp.business.currency, refs, me: ws.actor.id };
   const state = t.states.find((s) => s.key === rec.status);
-  const history = await store.listAudit(tenant, { recordId: id, limit: 20 });
+  const history = await ws.store.listAudit(tenant, { recordId: id, limit: 20 });
   const shown = t.fields.filter((f) => f.key !== "number" && f.type !== "lines" && (f.key !== "currency" || ws.bp.extensions.includes("multi_currency")));
   const hrefOf = (target: string) => {
     const x = ws.compiled.targets.get(target)!;

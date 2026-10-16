@@ -1,78 +1,98 @@
 import "server-only";
+import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 import { Blueprint, navigation } from "@shapewise/blueprint";
 import { bakery, plasticsFactory } from "@shapewise/blueprint/fixtures";
-import { MemoryStore, compile, createExecutor, type Actor, type Command, type CommandResult } from "@shapewise/runtime";
+import { FirestoreStore, loadBlueprint, memberRole } from "@shapewise/db";
+import { MemoryStore, compile, createExecutor, type Actor, type Command, type CommandResult, type Store } from "@shapewise/runtime";
+import { adminDb } from "./auth/admin";
 import { getSession } from "./auth/session";
-import { workspaceAccess } from "./auth/policy";
+import { PUBLIC_TENANTS, roleIn } from "./auth/policy";
 import { settingsData } from "./settings-data";
 
 const DEMOS = { demo: plasticsFactory, bakery } as const;
 
 /**
- * Records live in an in-memory store for now (kept across hot reloads), so
- * everything works end to end before the Firestore store is plugged in.
- * Restarting the server clears it.
+ * Demo workspaces live in memory (open to anyone, reset when the server
+ * restarts, never touching the database). Real workspaces live in Firestore.
  */
-const g = globalThis as typeof globalThis & { __swStore?: MemoryStore; __swBlueprints?: Map<string, Blueprint> };
-export const store = (g.__swStore ??= new MemoryStore());
+const g = globalThis as typeof globalThis & { __swStore?: MemoryStore; __swBlueprints?: Map<string, Blueprint>; __swFirestore?: FirestoreStore };
+const memoryStore = (g.__swStore ??= new MemoryStore());
+const demoBlueprints = (g.__swBlueprints ??= new Map<string, Blueprint>());
+const firestoreStore = () => (g.__swFirestore ??= new FirestoreStore(adminDb()));
 
-/** The live blueprint per workspace once it has been changed in settings; otherwise the demo's own. */
-const blueprints = (g.__swBlueprints ??= new Map<string, Blueprint>());
-export function setBlueprint(tenant: string, bp: Blueprint) {
-  blueprints.set(tenant, bp);
+export const isDemo = (tenant: string) => tenant in DEMOS;
+
+/** A changed demo blueprint, kept in memory until restart. */
+export function setDemoBlueprint(tenant: string, bp: Blueprint) {
+  demoBlueprints.set(tenant, bp);
+}
+
+const parsedDemos = new Map<string, Blueprint>();
+function demoBlueprint(tenant: keyof typeof DEMOS): Blueprint {
+  const changed = demoBlueprints.get(tenant);
+  if (changed) return changed;
+  let bp = parsedDemos.get(tenant);
+  if (!bp) parsedDemos.set(tenant, (bp = Blueprint.parse(DEMOS[tenant])));
+  return bp;
 }
 
 /**
- * Loads a workspace for the signed-in person, or sends them to sign in.
- * Demo workspaces are open to everyone; visitors act as the owner there so
- * every screen can be tried. Real workspaces will read the cached blueprint
- * from tenants/{tid}/blueprints/{active}; until then only demos exist.
+ * Loads a workspace for the person asking, or sends them to sign in.
+ * Membership of real workspaces is read from tenants/{tid}/members, so it
+ * takes effect at once (sign-in token claims can lag behind).
  */
-export async function loadWorkspace(tenant: string) {
+export const loadWorkspace = cache(async (tenant: string) => {
   const session = await getSessionSafe();
-  const access = workspaceAccess(tenant, session);
-  if (!access.ok) {
-    const next = encodeURIComponent(`/w/${tenant}`);
-    redirect(`/sign-in?next=${next}${access.reason === "not_member" ? "&reason=not_member" : ""}` as never);
+  const next = encodeURIComponent(`/w/${tenant}`);
+
+  let bp: Blueprint;
+  let role: string | null;
+  let store: Store;
+  if (isDemo(tenant)) {
+    bp = demoBlueprint(tenant as keyof typeof DEMOS);
+    role = roleIn(session, tenant);
+    store = memoryStore;
+  } else {
+    if (!session) redirect(`/sign-in?next=${next}` as never);
+    const db = adminDb();
+    const loaded = await loadBlueprint(db, tenant).catch(() => null);
+    if (!loaded) notFound();
+    role = await memberRole(db, tenant, session.uid);
+    if (!role) redirect(`/sign-in?next=${next}&reason=not_member` as never);
+    bp = loaded.bp;
+    store = firestoreStore();
   }
-  const demo = DEMOS[tenant as keyof typeof DEMOS];
-  if (!demo) notFound();
-  const bp = blueprints.get(tenant) ?? parsed(tenant, demo);
+
   const compiled = compile(bp);
-  const role = access.role ?? bp.roles.find((r) => r.owner)!.key;
+  // Visitors to the public demos act as the owner, so every screen can be tried.
+  const roleKey = role ?? bp.roles.find((r) => r.owner)!.key;
   const actor: Actor = session
-    ? { kind: "user", id: session.uid, roleKey: role, channel: "web", displayName: session.name ?? session.email }
-    : { kind: "user", id: "visitor", roleKey: role, channel: "web", displayName: "Demo visitor" };
+    ? { kind: "user", id: session.uid, roleKey, channel: "web", displayName: session.name ?? session.email }
+    : { kind: "user", id: "visitor", roleKey, channel: "web", displayName: "Demo visitor" };
   return {
     tenant,
+    demo: isDemo(tenant),
     bp,
     compiled,
     actor,
+    store,
     sections: navigation(bp),
     base: `/w/${tenant}`,
-    viewer: session ? { name: session.name ?? session.email ?? "Signed in", role: access.role } : null,
+    viewer: session ? { name: session.name ?? session.email ?? "Signed in", role } : null,
   };
-}
+});
 
 export type Workspace = Awaited<ReturnType<typeof loadWorkspace>>;
-
-/** Parse each demo once, so the compiled form stays cached across requests. */
-const parsedDemos = new Map<string, Blueprint>();
-function parsed(tenant: string, input: unknown): Blueprint {
-  let bp = parsedDemos.get(tenant);
-  if (!bp) parsedDemos.set(tenant, (bp = Blueprint.parse(input)));
-  return bp;
-}
 
 /** What every page hands the workspace frame. */
 export function shellProps(ws: Workspace) {
   return { base: ws.base, workspaceName: ws.bp.business.name, viewer: ws.viewer, sections: ws.sections.filter((s) => s.key !== "admin"), settings: settingsData(ws) };
 }
 
-/** Run a command as the person using this workspace. The only way the web app writes. */
+/** Run a command as the person using this workspace. The only way the web app writes records. */
 export async function executeIn(ws: Workspace, command: Command): Promise<CommandResult> {
-  const execute = createExecutor({ store, blueprint: async () => ws.compiled });
+  const execute = createExecutor({ store: ws.store, blueprint: async () => ws.compiled });
   return execute({ id: crypto.randomUUID(), tenantId: ws.tenant, actor: ws.actor, command, issuedAt: new Date().toISOString() });
 }
 
@@ -85,3 +105,5 @@ async function getSessionSafe() {
     return null;
   }
 }
+
+export { PUBLIC_TENANTS };

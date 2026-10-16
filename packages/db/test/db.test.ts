@@ -93,3 +93,15 @@ describe("index catalogue", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 });
+
+describe("workspace addresses", () => {
+  it("suggests clean addresses from business names", async () => {
+    const { suggestWorkspaceId, workspaceIdProblem } = await import("../src");
+    expect(suggestWorkspaceId("Perera & Sons (Pvt) Ltd")).toBe("perera-sons");
+    expect(suggestWorkspaceId("DP Plastics")).toBe("dp-plastics");
+    expect(suggestWorkspaceId("Ab")).toBe("ab-workspace");
+    expect(workspaceIdProblem("dp-plastics")).toBeNull();
+    expect(workspaceIdProblem("demo")).toMatch(/reserved/);
+    expect(workspaceIdProblem("Bad Name")).toMatch(/lowercase/);
+  });
+});

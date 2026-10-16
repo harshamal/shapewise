@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import type { Command, CommandResult } from "@shapewise/runtime";
 import { z } from "zod";
 import { OverlayOp, applyOps } from "@shapewise/blueprint";
-import { executeIn, loadWorkspace, setBlueprint, store } from "@/lib/workspace";
+import { BlueprintConflict, saveBlueprint } from "@shapewise/db";
+import { adminDb } from "@/lib/auth/admin";
+import { executeIn, loadWorkspace, setDemoBlueprint } from "@/lib/workspace";
 
 /**
  * Server actions behind every record screen. Each one reloads the workspace,
@@ -59,8 +61,17 @@ export async function changeSettings(tenant: string, ops: OverlayOp[]): Promise<
   if (!parsed.success) return { ok: false, message: "That change isn't valid." };
   const r = applyOps(ws.bp, parsed.data);
   if (!r.ok) return { ok: false, message: r.issues[0]?.message ?? "That change isn't allowed.", issues: r.issues.map((i) => ({ path: i.path, message: i.message })) };
-  setBlueprint(tenant, r.blueprint);
-  await store.write(tenant, async (tx) => {
+  const summary = r.summary.join("; ");
+  if (ws.demo) setDemoBlueprint(tenant, r.blueprint);
+  else {
+    try {
+      await saveBlueprint(adminDb(), tenant, r.blueprint, ws.actor.id, summary);
+    } catch (e) {
+      if (e instanceof BlueprintConflict) return { ok: false, message: e.message };
+      throw e;
+    }
+  }
+  await ws.store.write(tenant, async (tx) => {
     tx.audit({
       id: `aud_${crypto.randomUUID()}`,
       at: new Date().toISOString(),
@@ -68,11 +79,11 @@ export async function changeSettings(tenant: string, ops: OverlayOp[]): Promise<
       actor: { id: ws.actor.id, name: ws.actor.displayName, kind: ws.actor.kind, channel: "web", roleKey: ws.actor.roleKey },
       target: "blueprint",
       action: "settings",
-      summary: `Settings: ${r.summary.join("; ")} (version ${r.blueprint.version})`,
+      summary: `Settings: ${summary} (version ${r.blueprint.version})`,
     });
   });
   revalidatePath(`/w/${tenant}`, "layout");
-  return { ok: true, message: r.summary.join("; ") };
+  return { ok: true, message: summary };
 }
 
 export async function decideApproval(tenant: string, approvalId: string, decision: "approve" | "reject", note?: string) {

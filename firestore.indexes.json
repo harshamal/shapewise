@@ -2040,6 +2040,20 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "target",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "actor.id",
           "order": "ASCENDING"
         },

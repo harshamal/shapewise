@@ -1,11 +1,11 @@
 import { StatusPill } from "@shapewise/ui";
 import { formatValue } from "@/lib/format";
-import { store, type Workspace } from "@/lib/workspace";
+import type { Workspace } from "@/lib/workspace";
 import { ApprovalButtons } from "./approval-buttons";
 
 /** Governance › Approvals: everything waiting for a decision, then recent decisions. */
 export async function ApprovalsInbox({ ws }: { ws: Workspace }) {
-  const all = await store.listApprovals(ws.tenant);
+  const all = await ws.store.listApprovals(ws.tenant);
   const pending = all.filter((a) => a.status === "pending");
   const done = all.filter((a) => a.status !== "pending").slice(0, 20);
   const role = ws.bp.roles.find((r) => r.key === ws.actor.roleKey);

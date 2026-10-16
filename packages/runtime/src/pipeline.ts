@@ -203,9 +203,11 @@ async function remove(run: Run, t: CTarget, id: string): Promise<CommandResult> 
   if (!deletable(t, rec)) {
     throw new Fail("engine_rule", `Only drafts can be deleted. ${t.actions.some((a) => a.key === "void") ? "Void it instead, so the record and its history stay." : ""}`.trim());
   }
-  for (const other of run.c.targets.values()) {
-    const using = (await run.tx.list(other.target)).find((r) => r.links.includes(id));
-    if (using) throw new Fail("engine_rule", `${titleOf(t, rec)} is used on ${other.label.toLowerCase()} ${titleOf(other, using)}, so it can't be deleted.${t.actions.some((a) => a.key === "archive") ? " Archive it instead." : ""}`);
+  const using = await run.tx.referencedBy(id);
+  if (using) {
+    const other = run.c.targets.get(using.target);
+    const where = other ? `${other.label.toLowerCase()} ${titleOf(other, using)}` : "another record";
+    throw new Fail("engine_rule", `${titleOf(t, rec)} is used on ${where}, so it can't be deleted.${t.actions.some((a) => a.key === "archive") ? " Archive it instead." : ""}`);
   }
   const parked = await maybePark(run, t, "delete", rec, rec);
   if (parked) return parked;

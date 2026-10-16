@@ -6,7 +6,7 @@ import { ApprovalsInbox } from "@/components/approvals-inbox";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { formatValue, isNumeric } from "@/lib/format";
 import { canCreate, listRecords, refTitles, targetFor } from "@/lib/records";
-import { loadWorkspace, shellProps, store, type Workspace } from "@/lib/workspace";
+import { loadWorkspace, shellProps, type Workspace } from "@/lib/workspace";
 
 const MAX_COLUMNS = 6;
 
@@ -131,7 +131,7 @@ function pickColumns(ws: Workspace, t: CTarget): CField[] {
 }
 
 async function AuditLog({ ws }: { ws: Workspace }) {
-  const entries = await store.listAudit(ws.tenant, { limit: 100 });
+  const entries = await ws.store.listAudit(ws.tenant, { limit: 100 });
   if (!entries.length) return <p className="rounded-sw border bg-surface px-6 py-12 text-center text-sm text-ink-muted">Nothing has happened in this workspace yet.</p>;
   return (
     <ol className="divide-y rounded-sw border bg-surface text-sm">
