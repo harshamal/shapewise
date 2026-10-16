@@ -20,7 +20,7 @@ describe("Gemini.json", () => {
   it("sends the schema and returns validated JSON", async () => {
     const f = fakeFetch([answer('{"preset":"food","count":2}')]);
     const g = new Gemini({ apiKey: "k", fetch: f.impl });
-    const r = await g.json({ contents: [{ role: "user", parts: [{ text: "hi" }] }], schema: Schema, system: "be brief" });
+    const r = await g.json({ messages: [{ role: "user", text: "hi" }], schema: Schema, system: "be brief" });
     expect(r.value).toEqual({ preset: "food", count: 2 });
     const cfg = f.calls[0]!.body.generationConfig as Record<string, unknown>;
     expect(cfg.responseMimeType).toBe("application/json");
@@ -31,7 +31,7 @@ describe("Gemini.json", () => {
   it("feeds validation errors back and accepts the corrected answer", async () => {
     const f = fakeFetch([answer('{"preset":"bakery","count":2}'), answer('{"preset":"food","count":2}')]);
     const g = new Gemini({ apiKey: "k", fetch: f.impl });
-    const r = await g.json({ contents: [{ role: "user", parts: [{ text: "hi" }] }], schema: Schema });
+    const r = await g.json({ messages: [{ role: "user", text: "hi" }], schema: Schema });
     expect(r.value.preset).toBe("food");
     const second = f.calls[1]!.body.contents as { parts: { text: string }[] }[];
     expect(second.at(-1)!.parts[0]!.text).toMatch(/preset/);
@@ -40,14 +40,14 @@ describe("Gemini.json", () => {
   it("gives up with a clear error after repeated bad output", async () => {
     const f = fakeFetch([answer("not json"), answer("{"), answer('{"x":1}')]);
     const g = new Gemini({ apiKey: "k", fetch: f.impl });
-    await expect(g.json({ contents: [], schema: Schema })).rejects.toMatchObject({ status: "invalid_output" });
+    await expect(g.json({ messages: [], schema: Schema })).rejects.toMatchObject({ status: "invalid_output" });
   });
 
   it("retries rate limits and server errors, not bad requests", async () => {
     const ok = fakeFetch([{ status: 503, body: {} }, answer('{"preset":"food","count":1}')]);
-    await expect(new Gemini({ apiKey: "k", fetch: ok.impl }).json({ contents: [], schema: Schema })).resolves.toBeTruthy();
+    await expect(new Gemini({ apiKey: "k", fetch: ok.impl }).json({ messages: [], schema: Schema })).resolves.toBeTruthy();
     const bad = fakeFetch([{ status: 400, body: { error: { message: "bad field" } } }]);
-    await expect(new Gemini({ apiKey: "k", fetch: bad.impl }).json({ contents: [], schema: Schema })).rejects.toBeInstanceOf(GeminiError);
+    await expect(new Gemini({ apiKey: "k", fetch: bad.impl }).json({ messages: [], schema: Schema })).rejects.toBeInstanceOf(GeminiError);
     expect(bad.calls).toHaveLength(1);
   });
 
@@ -66,5 +66,12 @@ describe("toGeminiSchema", () => {
     const s = toGeminiSchema(Schema);
     expect(s.$schema).toBeUndefined();
     expect(JSON.stringify(s)).toContain("plastics");
+  });
+
+  it("leaves out item counts Gemini refuses, but keeps properties named like keywords", () => {
+    const s = JSON.stringify(toGeminiSchema(z.object({ tags: z.array(z.string()).min(1).max(5), maxItems: z.number().max(9) })));
+    expect(s).not.toMatch(/"minItems":1|"maxItems":5/);
+    expect(s).toContain('"maxItems":{'); // the property survives
+    expect(s).toContain('"maximum":9');
   });
 });

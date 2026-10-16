@@ -17,6 +17,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@shapewise/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@shapewise/blueprint':
         specifier: workspace:*
         version: link:../../packages/blueprint

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { suggestWorkspaceId, workspaceIdProblem } from "@shapewise/db/workspace-id";
 import { Button, Input, cx } from "@shapewise/ui";
-import { createWorkspace, type CreateResult } from "./actions";
+import { createWorkspace, type CreateResult } from "../actions";
 
 export interface PresetOption {
   key: string;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LlmError, type Llm, type Message, type ModelTier, type ToolSpec, type Usage } from "./llm";
 import { EMBEDDING_DIMENSIONS, MODELS } from "./models";
 
 /**
@@ -20,22 +21,9 @@ export interface Content {
   parts: Part[];
 }
 
-export interface FunctionDeclaration {
-  name: string;
-  description: string;
-  parametersJsonSchema: Record<string, unknown>;
-}
-
-export class GeminiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number | "timeout" | "invalid_output" | "blocked",
-    readonly retryable: boolean,
-  ) {
-    super(message);
-    this.name = "GeminiError";
-  }
-}
+/** Kept as a name for callers; all providers throw LlmError. */
+export const GeminiError = LlmError;
+export type GeminiError = LlmError;
 
 export interface GeminiOptions {
   apiKey?: string;
@@ -52,14 +40,32 @@ export function apiKeyFromEnv(): string | undefined {
   return process.env.GEMINI_API_KEY ?? process.env.Gemini_API_Key ?? process.env.GOOGLE_API_KEY;
 }
 
-/** Zod → JSON Schema that Gemini's responseJsonSchema accepts. */
-export function toGeminiSchema(schema: z.ZodType): Record<string, unknown> {
-  const json = z.toJSONSchema(schema, { target: "draft-2020-12", io: "input", unrepresentable: "any" }) as Record<string, unknown>;
-  delete json.$schema;
-  return json;
+/**
+ * Keywords Gemini's responseJsonSchema refuses ("invalid argument") on
+ * larger schemas, found by probing (2026-10-16). They are left out of what
+ * is sent; the Zod schema still enforces them on every answer, and any
+ * violation is fed back to the model to correct.
+ */
+const UNSUPPORTED = new Set(["$schema", "minItems", "maxItems"]);
+
+function stripUnsupported(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(stripUnsupported);
+  if (!node || typeof node !== "object") return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (UNSUPPORTED.has(k)) continue;
+    // Property names are data, not keywords: keep them all.
+    out[k] = k === "properties" && v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, stripUnsupported(pv)])) : stripUnsupported(v);
+  }
+  return out;
 }
 
-export class Gemini {
+/** Zod → JSON Schema that Gemini's responseJsonSchema accepts. */
+export function toGeminiSchema(schema: z.ZodType): Record<string, unknown> {
+  return stripUnsupported(z.toJSONSchema(schema, { target: "draft-2020-12", io: "input", unrepresentable: "any" })) as Record<string, unknown>;
+}
+
+export class Gemini implements Llm {
   private readonly key: string;
   private readonly timeoutMs: number;
   private readonly attempts: number;
@@ -74,23 +80,26 @@ export class Gemini {
     this.fetchImpl = opts.fetch ?? fetch;
   }
 
+  readonly provider = "gemini" as const;
+
   /**
    * Ask for JSON matching `schema`. Invalid or truncated JSON is retried
    * (with the validation errors fed back once), so the result always passes.
    */
   async json<T extends z.ZodType>(args: {
-    model?: string;
+    tier?: ModelTier;
     system?: string;
-    contents: Content[];
+    messages: Message[];
     schema: T;
     temperature?: number;
   }): Promise<{ value: z.infer<T>; usage: Usage }> {
     const responseJsonSchema = toGeminiSchema(args.schema);
-    let contents = args.contents;
+    const base = toContents(args.messages);
+    let contents = base;
     let lastProblem = "";
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
       const res = await this.generate({
-        model: args.model ?? MODELS.chat,
+        model: modelFor(args.tier),
         system: args.system,
         contents,
         generationConfig: { responseMimeType: "application/json", responseJsonSchema, temperature: args.temperature ?? 0.2 },
@@ -111,7 +120,7 @@ export class Gemini {
         .join("\n");
       // Show the model what was wrong with its own answer and ask again.
       contents = [
-        ...args.contents,
+        ...base,
         { role: "model", parts: [{ text }] },
         { role: "user", parts: [{ text: `That JSON doesn't match the schema:\n${lastProblem}\nReturn the corrected JSON only.` }] },
       ];
@@ -119,16 +128,20 @@ export class Gemini {
     throw new GeminiError(`The model's answer didn't fit the required format. ${lastProblem}`, "invalid_output", false);
   }
 
-  /** One turn with tools; returns the model's content to append to history verbatim (keeps thought signatures). */
-  async turn(args: { model?: string; system?: string; contents: Content[]; tools: FunctionDeclaration[]; temperature?: number }) {
+  /** One turn that may call tools. The model's raw content is kept so thought signatures go back verbatim. */
+  async turn(args: { tier?: ModelTier; system?: string; messages: Message[]; tools: ToolSpec[] }) {
     const res = await this.generate({
-      model: args.model ?? MODELS.chat,
+      model: modelFor(args.tier),
       system: args.system,
-      contents: args.contents,
-      tools: args.tools.length ? [{ functionDeclarations: args.tools }] : undefined,
-      generationConfig: { temperature: args.temperature ?? 0.3 },
+      contents: toContents(args.messages),
+      tools: args.tools.length ? [{ functionDeclarations: args.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.parameters })) }] : undefined,
+      generationConfig: { temperature: 0.3 },
     });
-    return res;
+    const calls = res.content.parts.flatMap((p, i) => ("functionCall" in p ? [{ id: p.functionCall.id ?? `call_${i}`, name: p.functionCall.name, args: p.functionCall.args ?? {} }] : []));
+    return {
+      message: { role: "assistant" as const, text: textOf(res), toolCalls: calls.length ? calls : undefined, raw: res.content },
+      usage: res.usage,
+    };
   }
 
   async embed(texts: string[], taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY" | "SEMANTIC_SIMILARITY" = "SEMANTIC_SIMILARITY"): Promise<number[][]> {
@@ -178,11 +191,18 @@ export class Gemini {
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(this.timeoutMs),
         });
-        const json = (await r.json().catch(() => ({}))) as { error?: { message?: string } };
+        const json = (await r.json().catch(() => ({}))) as { error?: { message?: string; details?: { "@type"?: string; retryDelay?: string }[] } };
         if (r.ok) return json;
         const retryable = r.status === 429 || r.status >= 500;
         last = new GeminiError(friendly(r.status, json.error?.message), r.status, retryable);
         if (!retryable) throw last;
+        // Rate limits say how long to wait; honour it (up to a minute) instead of guessing.
+        const delay = json.error?.details?.find((d) => d["@type"]?.endsWith("RetryInfo"))?.retryDelay;
+        const seconds = delay ? Number.parseFloat(delay) : NaN;
+        if (attempt < this.attempts && Number.isFinite(seconds) && seconds > 0) {
+          await sleep(Math.min(60, seconds + 1) * 1000);
+          continue;
+        }
       } catch (e) {
         if (e instanceof GeminiError && !e.retryable) throw e;
         last = e instanceof GeminiError ? e : new GeminiError(e instanceof Error && e.name === "TimeoutError" ? "The AI took too long to answer." : "Couldn't reach the AI service.", "timeout", true);
@@ -191,12 +211,6 @@ export class Gemini {
     }
     throw last!;
   }
-}
-
-export interface Usage {
-  input: number;
-  output: number;
-  model: string;
 }
 
 export interface GenerateResult {
@@ -209,6 +223,29 @@ interface RawResponse {
   candidates?: { content?: { parts?: Part[] }; finishReason?: string }[];
   promptFeedback?: { blockReason?: string };
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+}
+
+function modelFor(tier: ModelTier = "chat"): string {
+  return tier === "design" ? MODELS.design : tier === "fast" ? MODELS.fast : MODELS.chat;
+}
+
+/** Neutral messages → Gemini contents. Tool results go back as functionResponse parts. */
+function toContents(messages: Message[]): Content[] {
+  const out: Content[] = [];
+  for (const m of messages) {
+    if (m.role === "user") out.push({ role: "user", parts: [{ text: m.text }] });
+    else if (m.role === "assistant") {
+      if (m.raw && typeof m.raw === "object" && "parts" in (m.raw as object)) out.push(m.raw as Content);
+      else out.push({ role: "model", parts: [...(m.text ? [{ text: m.text }] : []), ...(m.toolCalls ?? []).map((c) => ({ functionCall: { name: c.name, args: c.args, id: c.id } }))] });
+    } else {
+      const part = { functionResponse: { name: m.name, id: m.callId, response: (m.result && typeof m.result === "object" && !Array.isArray(m.result) ? m.result : { result: m.result }) as Record<string, unknown> } };
+      const prev = out.at(-1);
+      // Consecutive tool results belong in one user turn.
+      if (prev?.role === "user" && prev.parts.every((p) => "functionResponse" in p)) prev.parts.push(part);
+      else out.push({ role: "user", parts: [part] });
+    }
+  }
+  return out;
 }
 
 /** The visible text of an answer (thoughts excluded). */

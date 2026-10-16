@@ -7,6 +7,7 @@ import type { NavSection } from "@shapewise/blueprint";
 import { cx } from "@shapewise/ui";
 import type { SettingsData } from "@/lib/settings-data";
 import { AccountMenu } from "./account-menu";
+import { AssistantPanel } from "./assistant-panel";
 import { SettingsDialog } from "./settings-dialog";
 
 /**
@@ -60,10 +61,16 @@ export function WorkspaceShell({
         e.preventDefault();
         openSettings();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setAskOpen((o) => !o);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [openSettings]);
+  const [askOpen, setAskOpen] = useState(false);
+  const tenant = base.split("/").pop() ?? "";
 
   return (
     <div className="grid min-h-dvh grid-cols-1 md:grid-cols-[var(--sw-rail-width)_1fr]">
@@ -133,12 +140,25 @@ export function WorkspaceShell({
           <AccountMenu viewer={viewer} here={pathname} />
         </div>
       </aside>
+      <AssistantPanel tenant={tenant} open={askOpen} onClose={() => setAskOpen(false)} />
       <SettingsDialog data={settings} open={settingsTab !== null} tab={settingsTab ?? ""} onTab={openSettings} onClose={closeSettings} />
 
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-10 flex h-[var(--sw-topbar-height)] items-center gap-4 border-b bg-canvas/90 px-4 backdrop-blur md:px-6">
           <h1 className="truncate text-[15px] font-medium">{title}</h1>
-          <div className="ml-auto flex items-center gap-2">{actions}</div>
+          <div className="ml-auto flex items-center gap-2">
+            {actions}
+            <button
+              type="button"
+              onClick={() => setAskOpen((o) => !o)}
+              aria-expanded={askOpen}
+              aria-keyshortcuts="Control+J"
+              className="inline-flex h-8 items-center gap-1.5 rounded-sw border border-border-strong bg-surface px-3 text-[13px] font-medium hover:bg-surface-sunken"
+            >
+              Ask
+              <kbd className="text-[11px] text-ink-faint">Ctrl J</kbd>
+            </button>
+          </div>
         </header>
         <main id="main" className="flex-1 px-4 py-6 md:px-6">
           {children}
