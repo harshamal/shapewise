@@ -12,6 +12,7 @@ export interface AskResult {
   ok: boolean;
   message?: string;
   reply?: string;
+  suggestions?: string[];
   history?: Message[];
   proposals?: Proposal[];
   toolsUsed?: { name: string; args: unknown; ok: boolean }[];
@@ -35,7 +36,7 @@ export async function askAssistant(tenant: string, history: unknown, question: s
       h.data as Message[],
       q.data,
     );
-    return { ok: true, reply: r.reply, history: r.messages, proposals: r.proposals, toolsUsed: r.toolsUsed };
+    return { ok: true, reply: r.reply, suggestions: r.suggestions, history: r.messages, proposals: r.proposals, toolsUsed: r.toolsUsed };
   } catch (e) {
     return { ok: false, message: e instanceof LlmError ? e.message : "The assistant couldn't answer just now. Try again." };
   }

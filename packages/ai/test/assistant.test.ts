@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Blueprint } from "@shapewise/blueprint";
 import { plasticsFactory } from "@shapewise/blueprint/fixtures";
 import { MemoryStore, compile, createExecutor, type Command } from "@shapewise/runtime";
-import { runAssistant, runTool, systemPrompt, toolSpecs, type Llm, type Message, type Proposal, type ToolContext } from "../src";
+import { runAssistant, runTool, splitSuggestions, systemPrompt, toolSpecs, type Llm, type Message, type Proposal, type ToolContext } from "../src";
 
 const compiled = compile(Blueprint.parse(plasticsFactory));
 const store = new MemoryStore();
@@ -83,7 +83,7 @@ describe("runAssistant", () => {
   it("loops through tool calls and returns the final answer with what it used", async () => {
     const script: Message[] = [
       { role: "assistant", text: "", toolCalls: [{ id: "c1", name: "summarise", args: { record: "invoice", measure: "sum", field: "amount_due", where: "status = 'posted'" } }] },
-      { role: "assistant", text: "Customers owe Rs 4,000.00 on posted invoices." },
+      { role: "assistant", text: "Customers owe Rs 4,000.00 on posted invoices.\nNext: Who owes the most? | Show overdue invoices" },
     ];
     const seen: Message[][] = [];
     const llm: Llm = {
@@ -98,8 +98,16 @@ describe("runAssistant", () => {
     };
     const r = await runAssistant(llm, ctx(), [], "How much do customers owe?");
     expect(r.reply).toBe("Customers owe Rs 4,000.00 on posted invoices.");
+    expect(r.suggestions).toEqual(["Who owes the most?", "Show overdue invoices"]);
     expect(r.toolsUsed).toEqual([{ name: "summarise", args: expect.any(Object), ok: true }]);
     const toolResult = seen[1]!.at(-1) as Extract<Message, { role: "tool" }>;
     expect(toolResult).toMatchObject({ role: "tool", callId: "c1", result: { value: 4000 } });
+  });
+});
+
+describe("suggestions", () => {
+  it("splits the trailing Next line and leaves replies without one alone", () => {
+    expect(splitSuggestions("**Rs 4,000** is owed.\n\n**Next:** \"Remind Perera\" | Show top customers")).toEqual({ reply: "**Rs 4,000** is owed.", suggestions: ["Remind Perera", "Show top customers"] });
+    expect(splitSuggestions("Nothing is overdue.")).toEqual({ reply: "Nothing is overdue.", suggestions: [] });
   });
 });
