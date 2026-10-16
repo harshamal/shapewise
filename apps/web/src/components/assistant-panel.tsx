@@ -3,12 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { Message, Proposal } from "@shapewise/ai";
-import { Button, Textarea, cx } from "@shapewise/ui";
+import { Button, cx } from "@shapewise/ui";
+import { Composer, RichText, Thinking } from "@/components/ai-bits";
 import { askAssistant, confirmProposal } from "@/app/w/[tenant]/assistant-actions";
 
 type Turn =
   | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string; tools: { name: string; ok: boolean; record?: string }[]; proposals: (Proposal & { state?: "done" | "pending" | "failed" | "dismissed"; note?: string })[] };
+  | { kind: "assistant"; text: string; suggestions: string[]; tools: { name: string; ok: boolean; record?: string }[]; proposals: (Proposal & { state?: "done" | "pending" | "failed" | "dismissed"; note?: string })[] };
 
 const TOOL_LABEL: Record<string, string> = { search_records: "Looked at", get_record: "Opened", summarise: "Totalled", propose_change: "Proposed a change to" };
 
@@ -29,7 +30,9 @@ export function AssistantPanel({ tenant, open, onClose }: { tenant: string; open
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [turns, pending]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [turns, pending]);
   useEffect(() => {
     if (open) input.current?.focus();
   }, [open]);
@@ -52,6 +55,7 @@ export function AssistantPanel({ tenant, open, onClose }: { tenant: string; open
         {
           kind: "assistant",
           text: r.reply ?? "",
+          suggestions: r.suggestions ?? [],
           tools: (r.toolsUsed ?? []).map((u) => ({ name: u.name, ok: u.ok, record: (u.args as { record?: string })?.record })),
           proposals: r.proposals ?? [],
         },
@@ -84,24 +88,30 @@ export function AssistantPanel({ tenant, open, onClose }: { tenant: string; open
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4" aria-live="polite">
         {turns.length === 0 && (
-          <div className="space-y-2">
-            <p className="text-sm text-ink-muted">Ask about your records, totals and what needs attention. I can also prepare changes for you to confirm.</p>
-            {SUGGESTIONS.map((s) => (
-              <button key={s} type="button" onClick={() => ask(s)} className="block w-full rounded-sw border bg-surface px-3 py-2 text-left text-sm hover:bg-surface-sunken">
-                {s}
-              </button>
-            ))}
+          <div className="space-y-5 pt-6 animate-rise">
+            <div className="space-y-1.5">
+              <p className="text-lg tracking-tight">What would you like to know?</p>
+              <p className="text-sm text-ink-muted">Ask about records, totals and what needs attention. I can also prepare changes for you to confirm.</p>
+            </div>
+            <div className="divide-y rounded-sw border bg-surface">
+              {SUGGESTIONS.map((s) => (
+                <button key={s} type="button" onClick={() => ask(s)} className="group flex w-full items-center justify-between px-3.5 py-2.5 text-left text-sm hover:bg-surface-sunken">
+                  {s}
+                  <span aria-hidden="true" className="text-ink-faint transition-transform group-hover:translate-x-0.5">→</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {turns.map((t, i) =>
           t.kind === "user" ? (
-            <p key={i} className="ml-auto max-w-[85%] rounded-sw bg-accent px-3 py-2 text-sm text-accent-ink">
-              {t.text}
-            </p>
+            <div key={i} className="flex justify-end animate-rise">
+              <p className="max-w-[85%] rounded-2xl bg-surface-sunken px-3.5 py-2 text-sm whitespace-pre-wrap">{t.text}</p>
+            </div>
           ) : (
-            <div key={i} className="space-y-2">
+            <div key={i} className="space-y-3 animate-rise">
               {t.tools.length > 0 && (
-                <p className="text-xs text-ink-faint">
+                <p className="text-[11px] tracking-wide text-ink-faint">
                   {t.tools.map((u, j) => (
                     <span key={j} className={cx("mr-2", !u.ok && "line-through")}>
                       {TOOL_LABEL[u.name] ?? u.name} {u.record?.replaceAll("_", " ")}
@@ -109,7 +119,9 @@ export function AssistantPanel({ tenant, open, onClose }: { tenant: string; open
                   ))}
                 </p>
               )}
-              <div className="rounded-sw bg-surface px-3 py-2 text-sm whitespace-pre-wrap">{t.text}</div>
+              <div className="text-sm">
+                <RichText text={t.text} />
+              </div>
               {t.proposals.map((p) => (
                 <div key={p.id} className="rounded-sw border border-accent/40 bg-accent-soft px-3 py-2 text-sm">
                   <p className="font-medium">{p.summary}</p>
@@ -132,10 +144,19 @@ export function AssistantPanel({ tenant, open, onClose }: { tenant: string; open
                   )}
                 </div>
               ))}
+              {i === turns.length - 1 && !pending && t.suggestions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {t.suggestions.map((q) => (
+                    <button key={q} type="button" onClick={() => ask(q)} className="inline-flex min-h-8 items-center rounded-full border border-border-strong bg-surface px-3 text-[13px] text-ink-muted transition-colors hover:border-ink-faint hover:text-ink">
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ),
         )}
-        {pending && <p className="text-sm text-ink-muted">Looking…</p>}
+        {pending && <Thinking label="Looking" />}
         {error && (
           <p role="alert" className="text-sm text-danger-fg">
             {error}
@@ -144,32 +165,9 @@ export function AssistantPanel({ tenant, open, onClose }: { tenant: string; open
         <div ref={end} />
       </div>
 
-      <form
-        className="flex items-end gap-2 border-t p-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          ask(draft);
-        }}
-      >
-        <Textarea
-          ref={input}
-          aria-label="Ask a question"
-          rows={2}
-          className="min-h-0 flex-1 resize-none"
-          placeholder="Ask about your business…"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              ask(draft);
-            }
-          }}
-        />
-        <Button type="submit" disabled={pending || !draft.trim()}>
-          Ask
-        </Button>
-      </form>
+      <div className="p-3">
+        <Composer inputRef={input} label="Ask a question" value={draft} onChange={setDraft} onSend={() => ask(draft)} disabled={pending} placeholder="Ask about your business…" />
+      </div>
     </aside>
   );
 }

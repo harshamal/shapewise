@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import type { BusinessProfile, Message } from "@shapewise/ai";
+import type { BusinessProfile, InterviewPrompt, Message } from "@shapewise/ai";
 import type { Blueprint } from "@shapewise/blueprint";
-import { Button, StatusPill, Textarea, cx } from "@shapewise/ui";
+import { Button, StatusPill, cx } from "@shapewise/ui";
+import { Choices, Composer, Thinking } from "@/components/ai-bits";
 import type { BlueprintSummary } from "@/lib/blueprint-summary";
 import { createFromDesign, designSetup, interviewStep } from "../actions";
 
-type Chat = { role: "user" | "assistant"; text: string };
+type Turn = { role: "user"; text: string } | { role: "assistant"; prompt: InterviewPrompt };
 type Stage = "chat" | "designing" | "review";
 
 const LABELS: [keyof BusinessProfile, string][] = [
@@ -29,10 +30,11 @@ const LABELS: [keyof BusinessProfile, string][] = [
   ["taxes", "Taxes"],
 ];
 
-export function AiOnboarding({ opening }: { opening: string }) {
+export function AiOnboarding({ opening }: { opening: InterviewPrompt }) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("chat");
-  const [chat, setChat] = useState<Chat[]>([{ role: "assistant", text: opening }]);
+  const [turns, setTurns] = useState<Turn[]>([{ role: "assistant", prompt: opening }]);
+  const [history, setHistory] = useState<Message[]>([]);
   const [profile, setProfile] = useState<BusinessProfile>({});
   const [ready, setReady] = useState(false);
   const [draft, setDraft] = useState("");
@@ -41,26 +43,32 @@ export function AiOnboarding({ opening }: { opening: string }) {
   const [address, setAddress] = useState("");
   const [pending, start] = useTransition();
   const end = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [chat, pending]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns, pending]);
+  useEffect(() => {
+    if (!pending && stage === "chat") input.current?.focus({ preventScroll: true });
+  }, [pending, stage]);
 
-  function send(e?: React.FormEvent) {
-    e?.preventDefault();
-    const message = draft.trim();
+  function answer(text: string) {
+    const message = text.trim();
     if (!message || pending) return;
+    if (ready && /^build/i.test(message)) return build();
     setDraft("");
     setError(null);
-    const history: Message[] = chat.map((m) => ({ role: m.role, text: m.text }));
-    setChat((c) => [...c, { role: "user", text: message }]);
+    setTurns((t) => [...t, { role: "user", text: message }]);
     start(async () => {
       const r = await interviewStep({ history, profile, message });
       if (!r.ok) {
         setError(r.message ?? "Couldn't send that.");
-        setChat((c) => c.slice(0, -1));
+        setTurns((t) => t.slice(0, -1));
         setDraft(message);
         return;
       }
-      setChat((c) => [...c, { role: "assistant", text: r.reply! }]);
+      setTurns((t) => [...t, { role: "assistant", prompt: r.prompt! }]);
+      setHistory(r.history ?? []);
       setProfile(r.profile!);
       setReady(Boolean(r.ready));
     });
@@ -97,17 +105,7 @@ export function AiOnboarding({ opening }: { opening: string }) {
     return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== "";
   });
 
-  if (stage === "designing") {
-    return (
-      <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-4 px-6 text-center">
-        <div className="mx-auto size-10 animate-spin rounded-full border-2 border-border-strong border-t-accent" aria-hidden="true" />
-        <h1 className="text-xl tracking-tight">Designing your setup…</h1>
-        <p className="text-sm text-ink-muted" role="status">
-          Choosing modules, adding the details you track, setting up roles and approvals, and checking that everything fits together. This usually takes under a minute.
-        </p>
-      </main>
-    );
-  }
+  if (stage === "designing") return <Designing name={profile.businessName} />;
 
   if (stage === "review" && design) {
     const s = design.summary;
@@ -229,74 +227,146 @@ export function AiOnboarding({ opening }: { opening: string }) {
     );
   }
 
+  const last = turns.at(-1);
+  const current = last?.role === "assistant" ? last.prompt : undefined;
+  const offerBuild = ready && !pending;
+
   return (
-    <main className="mx-auto grid min-h-dvh max-w-5xl gap-6 px-6 py-10 lg:grid-cols-[1fr_300px]">
-      <section className="flex min-h-[70dvh] flex-col">
-        <div className="mb-4">
+    <main className="mx-auto grid min-h-dvh max-w-6xl gap-10 px-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <section className="mx-auto flex w-full max-w-2xl flex-col">
+        <header className="sticky top-0 z-10 flex items-center gap-3 bg-canvas/90 py-4 backdrop-blur">
           <Link href="/start" className="text-sm text-ink-muted hover:text-ink">
             ← Back
           </Link>
-          <h1 className="mt-3 text-xl tracking-tight">Tell us about your business</h1>
-        </div>
-        <div className="flex-1 space-y-3 overflow-y-auto rounded-sw border bg-surface p-4" aria-live="polite">
-          {chat.map((m, i) => (
-            <div key={i} className={cx("max-w-[85%] rounded-sw px-3.5 py-2.5 text-sm whitespace-pre-wrap", m.role === "user" ? "ml-auto bg-accent text-accent-ink" : "bg-surface-sunken")}>
-              {m.text}
-            </div>
-          ))}
-          {pending && <div className="w-16 rounded-sw bg-surface-sunken px-3.5 py-2.5 text-sm text-ink-muted">…</div>}
+          <span className="text-sm text-ink-faint">Set up with AI</span>
+          <span className="ml-auto text-xs text-ink-faint tabular lg:hidden">{known.length} details</span>
+          <Button size="sm" variant={ready ? "primary" : "secondary"} className="lg:hidden" onClick={build} disabled={pending || known.length < 3}>
+            Build
+          </Button>
+        </header>
+
+        <div className="flex-1 space-y-8 pt-6 pb-8" aria-live="polite">
+          {turns.map((t, i) =>
+            t.role === "user" ? (
+              <div key={i} className="flex justify-end animate-rise">
+                <p className="max-w-[80%] rounded-2xl bg-surface-sunken px-4 py-2.5 text-sm whitespace-pre-wrap">{t.text}</p>
+              </div>
+            ) : (
+              <div key={i} className={cx("space-y-3 animate-rise", t !== last && "opacity-60")}>
+                <p className="text-[11px] tracking-[0.08em] text-ink-faint uppercase">{t.prompt.topicLabel}</p>
+                {t.prompt.note && <p className="text-sm leading-relaxed text-ink-muted">{t.prompt.note}</p>}
+                <h2 className="text-lg leading-snug tracking-tight text-ink sm:text-xl">{t.prompt.question}</h2>
+                {t === last && !pending && (t.prompt.input.kind !== "text" || offerBuild) && (
+                  <div className="pt-2">
+                    <Choices
+                      key={i}
+                      kind={t.prompt.input.kind === "text" ? "single" : t.prompt.input.kind}
+                      options={t.prompt.input.kind === "text" ? [] : t.prompt.input.options.filter((o) => !(offerBuild && /^build/i.test(o)))}
+                      onAnswer={answer}
+                      lead={
+                        offerBuild && (
+                          <button type="button" onClick={build} className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent px-4 text-sm text-accent-ink hover:bg-accent-hover">
+                            Build my setup <span aria-hidden="true">→</span>
+                          </button>
+                        )
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            ),
+          )}
+          {pending && <Thinking />}
+          {error && (
+            <p role="alert" className="text-sm text-danger-fg">
+              {error}
+            </p>
+          )}
           <div ref={end} />
         </div>
-        {error && (
-          <p role="alert" className="mt-2 text-sm text-danger-fg">
-            {error}
-          </p>
-        )}
-        <form onSubmit={send} className="mt-3 flex items-end gap-2">
-          <Textarea
-            aria-label="Your answer"
-            rows={2}
-            className="min-h-0 flex-1 resize-none"
+
+        <div className="sticky bottom-0 bg-canvas pt-2 pb-5">
+          <Composer
+            inputRef={input}
+            label="Your answer"
             value={draft}
-            placeholder="Type your answer…"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
+            onChange={setDraft}
+            onSend={() => answer(draft)}
+            disabled={pending}
+            placeholder={current?.input.placeholder || "Type your answer…"}
           />
-          <Button type="submit" disabled={pending || !draft.trim()}>
-            Send
-          </Button>
-        </form>
+        </div>
       </section>
 
-      <aside className="space-y-4">
-        <div className="rounded-sw border bg-surface p-4">
-          <h2 className="mb-2 text-sm font-medium">What we know so far</h2>
+      <aside className="hidden lg:block">
+        <div className="sticky top-0 space-y-5 py-6">
+          <div>
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-sm font-medium">Your business</h2>
+              <span className="text-xs text-ink-faint tabular">{known.length} details</span>
+            </div>
+            <div className="mt-2 h-0.5 overflow-hidden rounded-full bg-border">
+              <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${Math.min(100, ready ? 100 : (known.length / 9) * 100)}%` }} />
+            </div>
+          </div>
           {known.length === 0 ? (
-            <p className="text-sm text-ink-muted">Answers appear here as you go.</p>
+            <p className="text-sm text-ink-faint">What you tell me shows up here.</p>
           ) : (
-            <dl className="space-y-2 text-sm">
+            <dl className="space-y-3 text-sm">
               {known.map(([k, label]) => {
                 const v = profile[k];
                 return (
-                  <div key={k}>
-                    <dt className="text-xs text-ink-muted">{label}</dt>
-                    <dd>{Array.isArray(v) ? v.join(", ") : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v)}</dd>
+                  <div key={k} className="animate-rise">
+                    <dt className="text-[11px] tracking-[0.08em] text-ink-faint uppercase">{label}</dt>
+                    <dd className="mt-0.5 leading-relaxed">{Array.isArray(v) ? v.join(", ") : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v)}</dd>
                   </div>
                 );
               })}
             </dl>
           )}
+          <div className="space-y-2 border-t pt-5">
+            <Button variant={ready ? "primary" : "secondary"} className="w-full" onClick={build} disabled={pending || known.length < 3}>
+              Build my setup
+            </Button>
+            <p className="text-xs leading-relaxed text-ink-faint">{ready ? "I have enough for a strong first setup. You'll review it before anything is created." : "A few more answers make it fit better — but you can build any time."}</p>
+          </div>
         </div>
-        <Button variant={ready ? "primary" : "secondary"} className="w-full" onClick={build} disabled={pending || known.length < 3}>
-          Build my setup
-        </Button>
-        <p className="text-xs text-ink-muted">{ready ? "We have enough to build a good first setup." : "A few more answers will make the setup fit better, but you can build it any time."}</p>
       </aside>
+    </main>
+  );
+}
+
+const DESIGN_STEPS = ["Reading your answers", "Choosing what you'll use", "Shaping records around your work", "Setting up roles and approvals", "Checking everything fits together"];
+
+function Designing({ name }: { name?: string }) {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setStep((s) => Math.min(s + 1, DESIGN_STEPS.length - 1)), 6000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
+      <p className="text-[11px] tracking-[0.08em] text-ink-faint uppercase">Designing</p>
+      <h1 className="mt-2 text-2xl tracking-tight">{name ? `Building ${name}` : "Building your setup"}</h1>
+      <ol className="mt-8 space-y-3.5" role="status">
+        {DESIGN_STEPS.map((label, i) => (
+          <li key={label} className={cx("flex items-center gap-3 text-sm transition-colors duration-500", i < step ? "text-ink-muted" : i === step ? "text-ink" : "text-ink-faint/60")}>
+            <span className="flex size-4 items-center justify-center" aria-hidden="true">
+              {i < step ? (
+                <svg viewBox="0 0 16 16" className="size-3.5 text-accent" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m3.5 8.5 3 3 6-7" />
+                </svg>
+              ) : i === step ? (
+                <span className="size-3 animate-spin rounded-full border-[1.5px] border-border-strong border-t-accent" />
+              ) : (
+                <span className="size-1 rounded-full bg-current" />
+              )}
+            </span>
+            {label}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-8 text-xs text-ink-faint">Usually under a minute. Nothing is created until you approve it.</p>
     </main>
   );
 }

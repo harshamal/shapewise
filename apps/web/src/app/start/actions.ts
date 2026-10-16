@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { BusinessProfile, LlmError, OPENING, createLlm, designBlueprint, interviewTurn, profileReady, type Message } from "@shapewise/ai";
+import { BusinessProfile, LlmError, OPENING, createLlm, designBlueprint, interviewTurn, profileReady, type InterviewPrompt, type Message } from "@shapewise/ai";
 import { Blueprint, PRESET_BY_KEY, presetBlueprint, validateBlueprint } from "@shapewise/blueprint";
 import { WorkspaceIdTaken, createTenant, suggestWorkspaceId, workspaceIdProblem } from "@shapewise/db";
 import { adminAuth, adminDb } from "@/lib/auth/admin";
@@ -63,7 +63,7 @@ export interface InterviewResult {
   ok: boolean;
   history?: Message[];
   profile?: BusinessProfile;
-  reply?: string;
+  prompt?: InterviewPrompt;
   ready?: boolean;
   message?: string;
 }
@@ -76,7 +76,7 @@ export async function interviewStep(input: unknown): Promise<InterviewResult> {
     const llm = createLlm();
     const history = parsed.data.history.length ? parsed.data.history : [{ role: "assistant" as const, text: OPENING }];
     const r = await interviewTurn(llm, { history, profile: parsed.data.profile }, parsed.data.message);
-    return { ok: true, history: r.history, profile: r.profile, reply: r.reply, ready: r.ready };
+    return { ok: true, history: r.history, profile: r.profile, prompt: r.prompt, ready: r.ready };
   } catch (e) {
     return { ok: false, message: e instanceof LlmError ? e.message : "Something went wrong talking to the AI. Try again." };
   }

@@ -10,6 +10,8 @@ import { runTool, toolSpecs, visibleTargets, type Proposal, type ToolContext } f
 
 export interface AssistantResult {
   reply: string;
+  /** Two or three likely next questions, for the person to tap. */
+  suggestions: string[];
   messages: Message[];
   proposals: Proposal[];
   toolsUsed: { name: string; args: unknown; ok: boolean }[];
@@ -45,6 +47,9 @@ How to answer:
 - If a tool returns an error, fix the call (it says what was wrong) and try again.
 - To create or change anything, use propose_change. It is not done until the person confirms; say what it will do, never that it's done.
 - If the person asks for something their role can't see or do, say so plainly.
+- Lead with the answer (the number, the name, the yes/no), then the detail. Use **bold** for the key figure. No preamble, no "Sure!".
+- Finish with one final line exactly like: Next: <question> | <question> | <question>
+  Two or three short follow-ups the person is most likely to want next, written as they'd type them, specific to what you just found (e.g. "Remind Perera Stores", "Show invoices over Rs 100,000"). Don't mention this line.
 - Filters use Shapewise expressions over field keys: status = 'posted' and due_date < today(); customer.name = 'X'; contains(lower(name), 'cake').
 
 Record types this person can see (key: fields | statuses | actions | lines):
@@ -66,12 +71,27 @@ export async function runAssistant(llm: Llm, ctx: ToolContext, history: Message[
     usage.push(res.usage);
     messages.push(res.message);
     const calls = res.message.toolCalls ?? [];
-    if (!calls.length) return { reply: res.message.text.trim() || "I couldn't find an answer to that.", messages, proposals, toolsUsed, usage };
+    if (!calls.length) {
+      const { reply, suggestions } = splitSuggestions(res.message.text);
+      return { reply: reply || "I couldn't find an answer to that.", suggestions, messages, proposals, toolsUsed, usage };
+    }
     for (const call of calls) {
       const result = await runTool(ctx, call.name, call.args, proposals);
       toolsUsed.push({ name: call.name, args: call.args, ok: !(result && typeof result === "object" && "error" in result) });
       messages.push({ role: "tool", callId: call.id, name: call.name, result });
     }
   }
-  return { reply: "That took too many steps; try asking more specifically.", messages, proposals, toolsUsed, usage };
+  return { reply: "That took too many steps; try asking more specifically.", suggestions: [], messages, proposals, toolsUsed, usage };
+}
+
+/** Pull the trailing "Next: a | b | c" line off a reply. */
+export function splitSuggestions(text: string): { reply: string; suggestions: string[] } {
+  const m = /(?:^|\n)\s*\**next\**\s*:\s*\**\s*(.+?)\s*$/i.exec(text.trimEnd());
+  if (!m) return { reply: text.trim(), suggestions: [] };
+  const suggestions = m[1]!
+    .split("|")
+    .map((s) => s.trim().replace(/^["'“]|["'”]$/g, ""))
+    .filter((s) => s.length > 1 && s.length <= 80)
+    .slice(0, 3);
+  return { reply: text.slice(0, m.index).trim(), suggestions };
 }
