@@ -3,14 +3,18 @@ import {
   CORE_RECORDS,
   EXTENSION_BY_KEY,
   MODULE_BY_KEY,
+  PERM_ACTIONS,
   SUBMODULE_BY_KEY,
+  SUBMODULE_FOR_RECORD,
   checkBlueprint,
   presetBlueprint,
   withRequirements,
   withoutSubmodules,
   type BlueprintInput,
+  type CoreRecordKey,
   type ExtensionKey,
   type Issue,
+  type PermAction,
 } from "@shapewise/blueprint";
 import type { BlueprintPlan, PlanField } from "./schema";
 
@@ -170,7 +174,7 @@ export function assemble(plan: BlueprintPlan): Assembly {
   /* 8. roles: replace by key, or add */
   const roles = [...bp.roles];
   plan.roles.forEach((r, i) => {
-    const grants = r.grants.map((g) => ({ target: g.area === "*" ? "*" : (recordIds.get(g.area) ?? g.area), actions: [...new Set(g.actions)] }));
+    const grants = toGrants(r.grants, recordIds, (j, message) => issues.push({ planPath: ["roles", i, "grants", j, "area"], message }), notes, r.label);
     const existing = roles.findIndex((x) => x.key === r.key);
     if (existing >= 0) {
       if (roles[existing]!.owner) return issues.push({ planPath: ["roles", i], message: "The owner role can't be changed." }), undefined;
@@ -266,6 +270,50 @@ export function assemble(plan: BlueprintPlan): Assembly {
     if (i.severity === "error") issues.push({ planPath: toPlanPath(origin, i.path), message: i.message });
   }
   return { input: bp, blueprint: issues.length ? undefined : parsed.data, issues, notes };
+}
+
+const ENTITY_ACTIONS: readonly PermAction[] = ["view", "create", "edit", "approve", "void", "manage"];
+
+/**
+ * Plan grants → blueprint grants. Models often name a whole module
+ * ("production") or a record ("invoice") where a screen key ("invoices") is
+ * meant, so the intent is resolved here: a module grants each of its screens,
+ * a record grants the screen that lists it. Actions a screen doesn't have are
+ * dropped (noted), never errors. Only areas that can't be resolved at all are
+ * reported, with the valid choices.
+ */
+function toGrants(
+  grants: BlueprintPlan["roles"][number]["grants"],
+  recordIds: Map<string, string>,
+  problem: (index: number, message: string) => void,
+  notes: string[],
+  roleLabel: string,
+) {
+  const out = new Map<string, Set<PermAction>>();
+  const add = (target: string, allowed: readonly PermAction[], wanted: readonly PermAction[]) => {
+    const keep = wanted.filter((a) => allowed.includes(a));
+    if (!keep.length) return;
+    const set = out.get(target) ?? new Set<PermAction>();
+    keep.forEach((a) => set.add(a));
+    out.set(target, set);
+  };
+  grants.forEach((g, j) => {
+    const area = g.area.trim().toLowerCase();
+    if (area === "*") return add("*", PERM_ACTIONS, g.actions);
+    const entity = recordIds.get(area);
+    if (entity) return add(entity, ENTITY_ACTIONS, g.actions);
+    const sub = SUBMODULE_BY_KEY.get(area) ?? SUBMODULE_BY_KEY.get(SUBMODULE_FOR_RECORD.get(area as CoreRecordKey) ?? "") ?? SUBMODULE_BY_KEY.get(`${area}s`);
+    if (sub) return add(sub.key, sub.actions, g.actions);
+    const mod = MODULE_BY_KEY.get(area);
+    if (mod) {
+      for (const s of mod.submodules) add(s.key, s.actions, g.actions);
+      return;
+    }
+    problem(j, `"${g.area}" isn't a screen or record type. Use a submodule key such as invoices, items, batches, sales_orders, customers, or a module key such as sales.`);
+  });
+  const dropped = grants.filter((g) => g.actions.some((a) => !out.get(g.area)?.has(a)) && SUBMODULE_BY_KEY.has(g.area));
+  if (dropped.length) notes.push(`${roleLabel}: left out actions that don't apply to ${dropped.map((g) => g.area).join(", ")}.`);
+  return [...out.entries()].map(([target, set]) => ({ target, actions: [...set] }));
 }
 
 /** The plan path for a blueprint path, via the longest known prefix. */

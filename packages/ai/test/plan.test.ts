@@ -73,6 +73,29 @@ describe("assemble", () => {
     expect(sales).not.toContain("quotes");
   });
 
+  it("resolves role grants that name modules or records instead of screens", () => {
+    // Exactly what gpt-5.4-mini wrote in a live run.
+    const a = assemble({
+      ...bakeryPlan,
+      roles: [
+        { key: "baker", label: "Baker", description: "Bakes.", grants: [{ area: "production", actions: ["view", "create", "edit"] }, { area: "inventory", actions: ["view"] }] },
+        { key: "cashier", label: "Cashier", description: "Sells.", grants: [{ area: "pos", actions: ["view", "create"] }, { area: "invoice", actions: ["view", "post"] }] },
+        { key: "driver", label: "Driver", description: "Delivers.", grants: [{ area: "item", actions: ["view"] }, { area: "delivery_run", actions: ["view", "edit", "post"] }] },
+      ],
+    });
+    expect(a.issues).toEqual([]);
+    const role = (k: string) => a.blueprint!.roles.find((r) => r.key === k)!.grants;
+    expect(role("baker").map((g) => g.target)).toEqual(expect.arrayContaining(["batches", "recipes", "production_orders", "items", "stock"]));
+    expect(role("cashier").find((g) => g.target === "invoices")!.actions).toEqual(["view", "post"]);
+    // "post" doesn't apply to a custom record type: dropped, not an error.
+    expect(role("driver").find((g) => g.target === "ent_deliveryrun")!.actions).toEqual(["view", "edit"]);
+  });
+
+  it("reports grant areas it can't resolve, with the valid kinds", () => {
+    const a = assemble({ ...bakeryPlan, roles: [{ key: "x", label: "X", description: "", grants: [{ area: "spaceships", actions: ["view"] }] }] });
+    expect(a.issues[0]).toMatchObject({ planPath: ["roles", 0, "grants", 0, "area"], message: expect.stringMatching(/isn't a screen or record type/) });
+  });
+
   it("is deterministic", () => {
     expect(JSON.stringify(assemble(bakeryPlan).blueprint)).toBe(JSON.stringify(assemble(bakeryPlan).blueprint));
   });

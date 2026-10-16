@@ -23,6 +23,8 @@ Rules:
 - Expressions may only use field keys that exist on that record (core fields listed below, or fields you add).
 - Approvals: only on actions marked approvable, amounts in rupees, stages in increasing amount.
 - Roles: reuse owner, manager, accountant, sales, stores, supervisor, qc; add a role only for a distinct job.
+- Role grants: "area" is a submodule key from the list below (invoices, items, batches, pos_terminal, ...), a recordTypes key, or a module key to grant all of its screens.
+- Select fields compare with their option values exactly (item.type is 'goods' or 'service').
 - Put what you assumed (not told) in "assumptions" in plain words.
 - Prefer a smaller, correct setup over a large, speculative one.
 
