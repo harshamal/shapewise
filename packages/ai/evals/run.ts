@@ -31,6 +31,9 @@ const CASES: Case[] = [
     id: "plastics-moulder",
     profile: {
       businessName: "Lanka Containers",
+      country: "LK",
+      teamSize: "11_50",
+      turnover: "60_250m",
       whatTheyDo: "Injection-moulded food containers and lids, some with in-mould labels, sold to food manufacturers.",
       products: ["500 ml round container", "1 L square container", "95 mm lid"],
       customers: ["food manufacturers on 30-day credit", "orders by email"],
@@ -42,7 +45,8 @@ const CASES: Case[] = [
       thingsToTrack: ["colour code per order line", "label version"],
       approvals: ["owner approves purchases over Rs 500,000"],
       team: ["owner", "production supervisor", "QC officer", "storekeeper", "accountant"],
-      taxes: ["VAT registered"],
+      taxRegistrations: ["vat", "sscl"],
+      taxConfirmed: true,
     },
     expect: [
       { label: "production on", check: (bp) => has(bp, "production") },
@@ -56,6 +60,9 @@ const CASES: Case[] = [
     id: "bakery",
     profile: {
       businessName: "Sunrise Bakery",
+      country: "LK",
+      teamSize: "2_10",
+      turnover: "15_36m",
       whatTheyDo: "Bakes bread, buns and cakes; sells at its own shop counter and delivers to cafés every morning.",
       products: ["sandwich bread", "fish buns", "butter cake"],
       customers: ["walk-in customers paying cash at the counter", "cafés on weekly credit"],
@@ -77,6 +84,9 @@ const CASES: Case[] = [
     id: "hardware-distributor",
     profile: {
       businessName: "Kandy Hardware Distributors",
+      country: "LK",
+      teamSize: "11_50",
+      turnover: "250_750m",
       whatTheyDo: "Imports and distributes hardware to retail shops across the Central Province.",
       products: ["paint", "PVC pipes", "hand tools"],
       customers: ["hardware shops on 45-day credit", "sales reps take orders"],
@@ -97,6 +107,9 @@ const CASES: Case[] = [
     id: "garment-factory",
     profile: {
       businessName: "Colombo Apparel",
+      country: "LK",
+      teamSize: "51_200",
+      turnover: "250_750m",
       whatTheyDo: "Makes uniforms and t-shirts to order for schools and companies.",
       products: ["school uniforms", "branded t-shirts"],
       customers: ["schools", "companies placing bulk orders"],

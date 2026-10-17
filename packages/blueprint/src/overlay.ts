@@ -57,6 +57,8 @@ export const OverlayOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set_business"), patch: Value }),
   /** Replace a role's grant on one target; an empty action list removes it. */
   z.object({ op: z.literal("set_grant"), role: RoleId, target: z.union([z.literal("*"), Key]), actions: z.array(PermAction).max(8), scope: RowScope.optional() }),
+  /** Where a report shows up; no places takes it off every page (it stays in Reports). */
+  z.object({ op: z.literal("set_report"), key: z.string().max(40), places: z.array(z.string().max(20)).max(8), roles: z.array(RoleId).optional() }),
   /** Append starter data (never overwrites existing rows). */
   z.object({ op: z.literal("add_seed"), kind: z.enum(SEED_KINDS), value: Value }),
 

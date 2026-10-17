@@ -1,5 +1,5 @@
 import type { Blueprint } from "@shapewise/blueprint";
-import { assemble, type PlanIssue } from "./assemble";
+import { assemble, type AssemblyContext, type PlanIssue } from "./assemble";
 import type { BlueprintPlan } from "./schema";
 
 /**
@@ -19,12 +19,12 @@ export interface Salvaged {
 const LISTS = ["customFields", "recordTypes", "roles", "approvals", "rules", "views"] as const;
 type ListKey = (typeof LISTS)[number];
 
-export function salvage(plan: BlueprintPlan, maxRounds = 15): Salvaged {
+export function salvage(plan: BlueprintPlan, ctx: AssemblyContext = {}, maxRounds = 15): Salvaged {
   let current = structuredClone(plan);
   const removed: string[] = [];
 
   for (let round = 0; round < maxRounds; round++) {
-    const a = assemble(current);
+    const a = assemble(current, ctx);
     if (a.blueprint) return { blueprint: a.blueprint, plan: current, removed, notes: a.notes };
     const next = removeFailing(current, a.issues, removed);
     if (!next) break;
@@ -33,12 +33,12 @@ export function salvage(plan: BlueprintPlan, maxRounds = 15): Salvaged {
 
   // Nothing specific to remove, or it kept failing: keep only the safe parts of the plan.
   const minimal: BlueprintPlan = { ...plan, customFields: [], recordTypes: [], roles: [], approvals: [], rules: [], views: [], hideSubmodules: [], extensions: [], settings: {}, seed: {} };
-  const a = assemble(minimal);
+  const a = assemble(minimal, ctx);
   if (a.blueprint) {
     return { blueprint: a.blueprint, plan: minimal, removed: [...removed, "Everything beyond the starting setup (it couldn't be made consistent); you can add it again in System changes."], notes: a.notes };
   }
   // The preset itself is validated by tests; reaching here means the business name or modules are unusable.
-  const bare = assemble({ ...minimal, modules: [] });
+  const bare = assemble({ ...minimal, modules: [] }, ctx);
   if (!bare.blueprint) throw new Error(`Even the starting setup failed: ${bare.issues.map((i) => i.message).join("; ")}`);
   return { blueprint: bare.blueprint, plan: { ...minimal, modules: [] }, removed: [...removed, "The chosen modules"], notes: bare.notes };
 }

@@ -15,6 +15,13 @@ function build(): BlueprintInput {
   const bp = withoutSubmodules(preset, ["quotes", "delivery_notes", "vendor_credits"]);
   bp.settings = { ...bp.settings, inventory: { expiryAlertDays: [2, 1, 0] } };
 
+  bp.reports = [
+    { key: "daily_takings", places: ["module", "reports"] },
+    { key: "sales_summary", places: ["dashboard", "module", "reports"] },
+    { key: "sales_by_item", places: ["module", "reports"] },
+    { key: "yield", places: ["module", "reports"] },
+  ];
+
   const seed = bp.seed ?? {};
   bp.seed = {
     ...seed,

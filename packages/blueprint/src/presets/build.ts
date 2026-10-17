@@ -110,6 +110,8 @@ export function defaultRoles(modules: Set<string>, extensions: Set<ExtensionKey>
           customers: ["view"], vendors: ["view"], invoices: ["view", "create", "edit", "post", "void"], receipts: "all", credit_notes: ["view", "create", "edit", "post"],
           bills: "all", payments_made: "all", vendor_credits: "all", vendor_advances: "all", expenses: "all", statements: ["view"], three_way_match: ["view"],
           stock: ["view"], inventory_analytics: ["view"],
+          // To invoice from orders and deliveries, and bill what was received.
+          sales_orders: ["view"], delivery_notes: ["view"], purchase_orders: ["view"], goods_receipts: ["view"], items: ["view"],
         }),
       ],
     },
@@ -131,6 +133,8 @@ export function defaultRoles(modules: Set<string>, extensions: Set<ExtensionKey>
         dashboard: ["view"], items: ["view"], stock: ["view"], lots: ["view"], warehouses: ["view"],
         goods_receipts: ["view", "create", "edit", "post"], stock_transfers: ["view", "create", "edit", "post"], stock_adjustments: ["view", "create"],
         delivery_notes: ["view", "create", "edit", "post"], purchase_orders: ["view"], reorder: ["view"],
+        // To dispatch against sales orders and receive against suppliers.
+        sales_orders: ["view"], customers: ["view"], vendors: ["view"],
       }),
     });
   }
@@ -142,6 +146,8 @@ export function defaultRoles(modules: Set<string>, extensions: Set<ExtensionKey>
           dashboard: ["view"], production_overview: ["view"], recipes: ["view"], production_orders: ["view", "create", "edit"],
           batches: ["view", "create", "edit"], resources: ["view"], capacity: ["view"], traceability: ["view"], artwork: ["view"],
           items: ["view"], stock: ["view"], ncr: ["view", "create", "edit"], production_reports: ["view"],
+          // To plan make to order work from the orders it comes from.
+          sales_orders: ["view"],
         }),
       },
       {

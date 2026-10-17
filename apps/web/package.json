@@ -11,7 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@shapewise/ai": "workspace:*",
     "@shapewise/blueprint": "workspace:*",
+    "@shapewise/db": "workspace:*",
     "@shapewise/runtime": "workspace:*",
     "@shapewise/ui": "workspace:*",
     "firebase": "^13.0.0",
@@ -19,10 +21,10 @@
     "next": "^16.4.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "read-excel-file": "5.8.0",
     "server-only": "^0.0.1",
-    "zod": "^4.6.7",
-    "@shapewise/db": "workspace:*",
-    "@shapewise/ai": "workspace:*"
+    "unpdf": "1.1.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

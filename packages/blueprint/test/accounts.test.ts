@@ -28,3 +28,17 @@ describe("chart of accounts templates", () => {
     expect(issue?.message).toMatch(/inventory_wip.*Use "lk_manufacturing"/);
   });
 });
+
+describe("postings", () => {
+  it("only describe real actions that move stock or money, with both sides of every entry", async () => {
+    const { POSTINGS, CORE_RECORDS } = await import("../src");
+    for (const p of POSTINGS) {
+      const a = CORE_RECORDS[p.record].lifecycle?.actions.find((x) => x.key === p.action);
+      expect(a, `${p.record}.${p.action}`).toBeDefined();
+      if (p.ledger) expect(a!.effects, `${p.record}.${p.action} ledger`).toContain("ledger");
+      if (p.stock) expect(a!.effects, `${p.record}.${p.action} stock`).toContain("stock");
+      const lines = (p.ledger ?? []).filter((l) => !l.when);
+      if (lines.length) expect(new Set(lines.map((l) => l.side)).size, `${p.record}.${p.action} balances`).toBe(2);
+    }
+  });
+});

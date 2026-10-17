@@ -112,6 +112,8 @@ export interface Compiled {
   bySubmodule(key: string): CTarget | undefined;
   /** Allowed actions for a role on a submodule or custom record type. */
   can(roleKey: string, submodule: string, action: PermAction): boolean;
+  /** Which records of a screen a role sees: all, or only its own (by a person field, or who created them). */
+  scope(roleKey: string, submodule: string): RowScopeRule;
   rules(target: string, event: string): CRule[];
   approvals(target: string, action: string): CApproval[];
   resolved: Resolved;
@@ -197,14 +199,21 @@ export function compile(bp: Blueprint): Compiled {
 
   /* permissions: role key → submodule → actions */
   const perms = new Map<string, Map<string, Set<PermAction>>>();
+  const scopes = new Map<string, Map<string, RowScopeRule>>();
   const owners = new Set(bp.roles.filter((x) => x.owner).map((x) => x.key));
   for (const role of bp.roles) {
     const m = new Map<string, Set<PermAction>>();
+    const sc = new Map<string, RowScopeRule>();
     for (const g of role.grants) {
       const key = bp.entities.find((e) => e.id === g.target)?.key ?? g.target;
       m.set(key, new Set([...(m.get(key) ?? []), ...g.actions]));
+      // Any grant without a limit opens every record; "own" only applies when every grant says so.
+      const own = typeof g.scope === "object" && g.scope.kind === "own" ? g.scope : undefined;
+      const prev = sc.get(key);
+      sc.set(key, !own || prev === "all" ? "all" : (prev ?? { field: own.field }));
     }
     perms.set(role.key, m);
+    scopes.set(role.key, sc);
   }
 
   /* rules and approvals, expressions parsed once */
@@ -226,6 +235,12 @@ export function compile(bp: Blueprint): Compiled {
       if (owners.has(roleKey)) return true;
       const m = perms.get(roleKey);
       return Boolean(m?.get("*")?.has(action) || m?.get(submodule)?.has(action));
+    },
+    scope(roleKey, submodule) {
+      if (owners.has(roleKey)) return "all";
+      const m = scopes.get(roleKey);
+      if (m?.get("*") === "all") return "all";
+      return m?.get(submodule) ?? "all";
     },
     rules: (target, event) => rules.filter((x) => x.target === target && x.on.includes(event)),
     approvals: (target, action) => approvals.filter((a) => a.target === target && a.action === action),
@@ -271,7 +286,24 @@ function navLabel(bp: Blueprint, submodule: string): string | undefined {
   return undefined;
 }
 
+/** Words that are written in capitals wherever they appear. */
+const ACRONYMS = new Set(["vat", "sscl", "wht", "grn", "qc", "ncr", "coa", "pos", "wip", "fifo", "po", "so"]);
+
 export function humanise(key: string): string {
-  const s = key.replaceAll("_", " ");
+  const words = key.split("_").map((w) => (ACRONYMS.has(w) ? w.toUpperCase() : w));
+  const s = words.join(" ");
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "all", or only records that are the person's own: those a person field points at, or that they created. */
+export type RowScopeRule = "all" | { field?: string };
+
+/** Whether a person may see and work on a record, under their role's row scope. */
+export function visibleTo(c: Compiled, roleKey: string, actorId: string, t: CTarget, rec: { data: Record<string, unknown>; createdBy?: string }): boolean {
+  const s = c.scope(roleKey, t.submodule);
+  if (s === "all") return true;
+  if (!s.field) return rec.createdBy === actorId;
+  const key = t.fields.find((f) => f.key === s.field || f.id === s.field)?.key ?? s.field;
+  const v = rec.data[key];
+  return v === actorId || (Array.isArray(v) && v.includes(actorId)) || rec.createdBy === actorId;
 }

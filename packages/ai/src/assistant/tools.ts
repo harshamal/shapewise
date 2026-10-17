@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { checkExpr, evaluate, exprReads, type EvalContext, type ExprNode } from "@shapewise/blueprint";
-import { fromMinor, titleOf, type CField, type Compiled, type CTarget, type Store, type StoredRecord } from "@shapewise/runtime";
+import { fromMinor, titleOf, visibleTo, type CField, type Compiled, type CTarget, type Store, type StoredRecord } from "@shapewise/runtime";
 import type { ToolSpec } from "../llm";
 
 /**
@@ -15,6 +15,8 @@ export interface ToolContext {
   store: Store;
   tenant: string;
   roleKey: string;
+  /** The person asking; with it, roles limited to their own records only see those. */
+  actorId?: string;
   today: string;
   now: string;
 }
@@ -214,7 +216,7 @@ function present(t: CTarget, rec: StoredRecord, refs: Map<string, { t: CTarget; 
 async function search(ctx: ToolContext, a: z.infer<typeof SearchArgs>) {
   const t = targetOf(ctx, a.record);
   const filter = filterFor(ctx, t, a.where);
-  const all = await ctx.store.read(ctx.tenant, (tx) => tx.list(t.target));
+  const all = (await ctx.store.read(ctx.tenant, (tx) => tx.list(t.target))).filter((r) => mine(ctx, t, r));
   const refs = await loadWithRefs(ctx, t, all);
   let rows = filter ? all.filter((r) => evaluate(filter, evalCtx(ctx, t, r, refs)) === true) : all;
   if (a.order_by) {
@@ -231,7 +233,7 @@ async function search(ctx: ToolContext, a: z.infer<typeof SearchArgs>) {
 async function getOne(ctx: ToolContext, a: z.infer<typeof GetArgs>) {
   const t = targetOf(ctx, a.record);
   const rec = await ctx.store.read(ctx.tenant, (tx) => tx.get(t.target, a.id));
-  if (!rec) throw new ToolFailure(`No ${t.label.toLowerCase()} with id ${a.id}.`);
+  if (!rec || !mine(ctx, t, rec)) throw new ToolFailure(`No ${t.label.toLowerCase()} with id ${a.id}.`);
   const refs = await loadWithRefs(ctx, t, [rec]);
   const out = present(t, rec, refs);
   for (const l of [t.lines, ...t.children]) {
@@ -254,7 +256,7 @@ async function summarise(ctx: ToolContext, a: z.infer<typeof SummariseArgs>) {
   const groupField = a.group_by ? t.fields.find((f) => f.key === a.group_by) : undefined;
   if (a.group_by && !groupField && a.group_by !== "status") throw new ToolFailure(`"${a.group_by}" isn't a field of ${t.label}.`);
 
-  const all = await ctx.store.read(ctx.tenant, (tx) => tx.list(t.target));
+  const all = (await ctx.store.read(ctx.tenant, (tx) => tx.list(t.target))).filter((r) => mine(ctx, t, r));
   const refs = await loadWithRefs(ctx, t, all);
   const rows = filter ? all.filter((r) => evaluate(filter, evalCtx(ctx, t, r, refs)) === true) : all;
   const value = (r: StoredRecord) => {
@@ -296,7 +298,7 @@ function propose(ctx: ToolContext, a: z.infer<typeof ProposeArgs>, proposals: Pr
     recordId: a.id,
     action: a.action,
     to: a.to,
-    data: a.data,
+    data: a.data && withoutSystemFields(a.kind === "convert" ? (ctx.compiled.targets.get(a.to!) ?? t) : t, a.data),
     summary: a.summary,
   };
   proposals.push(p);
@@ -311,3 +313,20 @@ function cmp(a: unknown, b: unknown): number {
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** Whether the person may see this record under their role's row scope. */
+function mine(ctx: ToolContext, t: CTarget, r: StoredRecord): boolean {
+  return ctx.actorId === undefined || visibleTo(ctx.compiled, ctx.roleKey, ctx.actorId, t, r);
+}
+
+/** Totals, amounts and other values the system works out are left out of a proposal, on the record and on its lines. */
+function withoutSystemFields(t: CTarget, data: Record<string, unknown>): Record<string, unknown> {
+  const system = new Set(t.fields.filter((f) => f.system).map((f) => f.key));
+  const out = Object.fromEntries(Object.entries(data).filter(([k]) => !system.has(k)));
+  for (const list of [t.lines, ...t.children]) {
+    if (!list || !Array.isArray(out[list.key])) continue;
+    const sys = new Set(list.fields.filter((f) => f.system).map((f) => f.key));
+    out[list.key] = (out[list.key] as Record<string, unknown>[]).map((row) => Object.fromEntries(Object.entries(row).filter(([k]) => !sys.has(k))));
+  }
+  return out;
+}

@@ -1,4 +1,5 @@
-import type { Llm, Message, Usage } from "../llm";
+import { withoutImageData, type Attachment, type Llm, type Message, type Usage } from "../llm";
+import { undash } from "../onboarding/interview";
 import { runTool, toolSpecs, visibleTargets, type Proposal, type ToolContext } from "./tools";
 
 /**
@@ -19,6 +20,9 @@ export interface AssistantResult {
 }
 
 const MAX_TOOL_ROUNDS = 6;
+
+/** What the panel can show while the assistant works. */
+export type AssistantEvent = { type: "tool"; name: string; record?: string; ok: boolean } | { type: "text"; delta: string } | { type: "round" };
 
 export function systemPrompt(ctx: ToolContext): string {
   const { bp } = ctx.compiled;
@@ -48,6 +52,9 @@ How to answer:
 - To create or change anything, use propose_change. It is not done until the person confirms; say what it will do, never that it's done.
 - If the person asks for something their role can't see or do, say so plainly.
 - Lead with the answer (the number, the name, the yes/no), then the detail. Use **bold** for the key figure. No preamble, no "Sure!".
+- Plain sentences. Never use dashes as punctuation (no em dash, en dash or spaced hyphen).
+- Documents and photos the person attaches (a supplier bill, a price list, an order): read them closely. If they describe something to record, look up the matching customer, vendor or items with the tools, then offer it with propose_change.
+- When you need several lookups that don't depend on each other, call the tools together in one turn.
 - Finish with one final line exactly like: Next: <question> | <question> | <question>
   Two or three short follow-ups the person is most likely to want next, written as they'd type them, specific to what you just found (e.g. "Remind Perera Stores", "Show invoices over Rs 100,000"). Don't mention this line.
 - Filters use Shapewise expressions over field keys: status = 'posted' and due_date < today(); customer.name = 'X'; contains(lower(name), 'cake').
@@ -57,8 +64,15 @@ ${records || "(none)"}
 ${rules ? `\nBusiness rules in force:\n${rules}` : ""}${approvals ? `\nApproval rules:\n${approvals}` : ""}`;
 }
 
-export async function runAssistant(llm: Llm, ctx: ToolContext, history: Message[], question: string): Promise<AssistantResult> {
-  const messages: Message[] = [...history, { role: "user", text: question.slice(0, 4000) }];
+export async function runAssistant(
+  llm: Llm,
+  ctx: ToolContext,
+  history: Message[],
+  question: string,
+  opts: { attachments?: Attachment[]; onEvent?: (e: AssistantEvent) => void } = {},
+): Promise<AssistantResult> {
+  const messages: Message[] = [...withoutImageData(history), { role: "user", text: question.slice(0, 4000), attachments: opts.attachments?.length ? opts.attachments : undefined }];
+  const emit = opts.onEvent;
   const tools = toolSpecs(ctx);
   const system = systemPrompt(ctx);
   const proposals: Proposal[] = [];
@@ -67,21 +81,26 @@ export async function runAssistant(llm: Llm, ctx: ToolContext, history: Message[
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     // On the last round, no tools: the model must answer with what it has.
-    const res = await llm.turn({ tier: "chat", system, messages, tools: round < MAX_TOOL_ROUNDS ? tools : [] });
+    if (round > 0) emit?.({ type: "round" });
+    const res = await llm.turn({ tier: "chat", system, messages, tools: round < MAX_TOOL_ROUNDS ? tools : [], onText: emit ? (delta) => emit({ type: "text", delta }) : undefined });
     usage.push(res.usage);
     messages.push(res.message);
     const calls = res.message.toolCalls ?? [];
     if (!calls.length) {
       const { reply, suggestions } = splitSuggestions(res.message.text);
-      return { reply: reply || "I couldn't find an answer to that.", suggestions, messages, proposals, toolsUsed, usage };
+      return { reply: undash(reply) || "I couldn't find an answer to that.", suggestions: suggestions.map(undash), messages: withoutImageData(messages), proposals, toolsUsed, usage };
     }
-    for (const call of calls) {
-      const result = await runTool(ctx, call.name, call.args, proposals);
-      toolsUsed.push({ name: call.name, args: call.args, ok: !(result && typeof result === "object" && "error" in result) });
+    // Independent lookups run together; results go back in the order the model asked.
+    const results = await Promise.all(calls.map((call) => runTool(ctx, call.name, call.args, proposals)));
+    calls.forEach((call, i) => {
+      const result = results[i];
+      const ok = !(result && typeof result === "object" && "error" in result);
+      toolsUsed.push({ name: call.name, args: call.args, ok });
+      emit?.({ type: "tool", name: call.name, record: (call.args as { record?: string }).record, ok });
       messages.push({ role: "tool", callId: call.id, name: call.name, result });
-    }
+    });
   }
-  return { reply: "That took too many steps; try asking more specifically.", suggestions: [], messages, proposals, toolsUsed, usage };
+  return { reply: "That took too many steps. Try asking more specifically.", suggestions: [], messages: withoutImageData(messages), proposals, toolsUsed, usage };
 }
 
 /** Pull the trailing "Next: a | b | c" line off a reply. */

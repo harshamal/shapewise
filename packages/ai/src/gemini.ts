@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LlmError, type Llm, type Message, type ModelTier, type ToolSpec, type Usage } from "./llm";
+import { LlmError, attachmentText, type Llm, type Message, type ModelTier, type ToolSpec, type Usage } from "./llm";
 import { EMBEDDING_DIMENSIONS, MODELS } from "./models";
 
 /**
@@ -233,7 +233,14 @@ function modelFor(tier: ModelTier = "chat"): string {
 function toContents(messages: Message[]): Content[] {
   const out: Content[] = [];
   for (const m of messages) {
-    if (m.role === "user") out.push({ role: "user", parts: [{ text: m.text }] });
+    if (m.role === "user")
+      out.push({
+        role: "user",
+        parts: [
+          { text: m.text + attachmentText(m.attachments) },
+          ...(m.attachments ?? []).flatMap((a) => (a.kind === "image" && a.dataUrl ? [{ inlineData: { mimeType: a.mime, data: a.dataUrl.slice(a.dataUrl.indexOf(",") + 1) } }] : [])),
+        ],
+      });
     else if (m.role === "assistant") {
       if (m.raw && typeof m.raw === "object" && "parts" in (m.raw as object)) out.push(m.raw as Content);
       else out.push({ role: "model", parts: [...(m.text ? [{ text: m.text }] : []), ...(m.toolCalls ?? []).map((c) => ({ functionCall: { name: c.name, args: c.args, id: c.id } }))] });

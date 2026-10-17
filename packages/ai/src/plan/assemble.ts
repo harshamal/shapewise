@@ -1,5 +1,6 @@
 import {
   Blueprint,
+  COUNTRY_BY_CODE,
   CORE_RECORDS,
   EXTENSION_BY_KEY,
   MODULE_BY_KEY,
@@ -11,6 +12,9 @@ import {
   withRequirements,
   withoutSubmodules,
   type BlueprintInput,
+  type Country,
+  type SettingsInput,
+  type TaxDecision,
   type CoreRecordKey,
   type ExtensionKey,
   type Issue,
@@ -42,7 +46,21 @@ export interface Assembly {
 
 type Path = (string | number)[];
 
-export function assemble(plan: BlueprintPlan): Assembly {
+/**
+ * What code decides about a business outside the plan: where it is (currency,
+ * locale, fiscal year), which taxes apply, and the controls its size wants.
+ * Taxes always win over the plan; size controls only fill what the plan
+ * leaves unset.
+ */
+export interface AssemblyContext {
+  country?: Country;
+  tax?: TaxDecision;
+  sizeSettings?: SettingsInput;
+  /** Keep the preset's approval rules (default). The AI path starts with none. */
+  presetApprovals?: boolean;
+}
+
+export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assembly {
   const issues: PlanIssue[] = [];
   /** Things corrected automatically, shown to the person; not errors. */
   const notes: string[] = [];
@@ -53,7 +71,9 @@ export function assemble(plan: BlueprintPlan): Assembly {
   /* 1. start from the preset */
   const name = plan.businessName.trim().slice(0, 120) || "My business";
   if (name !== plan.businessName) notes.push(`Shortened the business name to "${name}".`);
-  let bp = presetBlueprint(plan.preset, { name, currency: "LKR", locale: "en-LK", timezone: "Asia/Colombo", industry: plan.industryDescription.trim().slice(0, 80) || undefined });
+  const where = ctx.country ?? COUNTRY_BY_CODE.get("LK")!;
+  let bp = presetBlueprint(plan.preset, { name, currency: where.currency, locale: where.locale, timezone: where.timezone, industry: plan.industryDescription.trim().slice(0, 80) || undefined });
+  bp.business = { ...bp.business, country: where.code, fiscalYearStartMonth: where.fiscalYearStartMonth };
   for (const r of bp.roles) ids.reserve(r.id);
   for (const a of bp.approvals ?? []) (ids.reserve(a.id), a.stages.forEach((s) => ids.reserve(s.id)));
   for (const v of bp.views ?? []) ids.reserve(v.id);
@@ -61,6 +81,14 @@ export function assemble(plan: BlueprintPlan): Assembly {
 
   /* 2. modules and hidden screens */
   const on = new Set<string>([...[...MODULE_BY_KEY.values()].filter((m) => m.core).map((m) => m.key), ...plan.modules]);
+  // A business registered for a tax needs the tax screens (returns, rates, certificates).
+  const taxed = ctx.tax && Object.values(ctx.tax.settings).some(Boolean);
+  if (taxed && !on.has("tax")) {
+    on.add("tax");
+    const t = ctx.tax!.settings;
+    const names = [t.vatRegistered && "VAT", t.ssclRegistered && "SSCL", t.wht && "withholding tax"].filter(Boolean);
+    notes.push(`Switched on Tax for your ${names.join(" and ")} returns.`);
+  }
   bp.modules = [...on].map((key) => ({ key, enabled: true }));
   const hide = plan.hideSubmodules.filter((k) => on.has(SUBMODULE_BY_KEY.get(k)?.module ?? ""));
   bp = withoutSubmodules(bp, hide);
@@ -76,7 +104,13 @@ export function assemble(plan: BlueprintPlan): Assembly {
 
   /* 4. settings: merge each group over the preset's */
   const s = (bp.settings ??= {}) as Record<string, Record<string, unknown> | undefined>;
+  for (const [group, values] of Object.entries(ctx.sizeSettings ?? {})) if (values) s[group] = { ...(s[group] ?? {}), ...(values as object) };
   for (const [group, values] of Object.entries(plan.settings)) if (values) s[group] = { ...(s[group] ?? {}), ...values };
+  if (ctx.tax) {
+    s.tax = { ...ctx.tax.settings };
+    if (plan.settings.tax && Object.entries(plan.settings.tax).some(([k, v]) => v !== undefined && (ctx.tax!.settings as Record<string, unknown>)[k] !== v)) notes.push("Taxes follow your registrations and turnover, not the design.");
+    (bp.seed ??= {}).taxCodes = ctx.tax.taxCodes;
+  }
   // The chart of accounts follows the modules: production needs WIP and scrap accounts, stock needs inventory accounts.
   const accounting = (s.accounting ??= {}) as { chartTemplate?: string };
   const chart = accounting.chartTemplate ?? "lk_trading";
@@ -119,7 +153,14 @@ export function assemble(plan: BlueprintPlan): Assembly {
 
   /* 6. custom fields on core records */
   const custom: NonNullable<BlueprintInput["customFields"]> = [...(bp.customFields ?? [])];
-  plan.customFields.forEach((cf, i) => {
+  plan.customFields.forEach((cf0, i) => {
+    const parts = CORE_RECORDS[cf0.record].customFields as readonly string[];
+    let cf = cf0;
+    if (!parts.includes(cf.part)) {
+      if (!parts.length) return notes.push(`Left out "${cf.label}": ${CORE_RECORDS[cf.record].label} can't take extra details.`), undefined;
+      cf = { ...cf, part: parts[0] as typeof cf.part };
+      notes.push(`"${cf.label}" goes on the ${CORE_RECORDS[cf.record].label.toLowerCase()} itself, as it has no lines.`);
+    }
     if (custom.some((c) => c.target === cf.record && (c.part ?? "header") === cf.part && c.field.key === cf.key)) return; // the preset already has it
     origin.set(`customFields.${custom.length}`, ["customFields", i]);
     custom.push({ target: cf.record, part: cf.part, showOnDocuments: cf.showOnDocuments, showInProduction: cf.showInProduction, field: toField(cf, cf.key, ["customFields", i]) as never });
@@ -177,7 +218,8 @@ export function assemble(plan: BlueprintPlan): Assembly {
     const grants = toGrants(r.grants, recordIds, (j, message) => issues.push({ planPath: ["roles", i, "grants", j, "area"], message }), notes, r.label);
     const existing = roles.findIndex((x) => x.key === r.key);
     if (existing >= 0) {
-      if (roles[existing]!.owner) return issues.push({ planPath: ["roles", i], message: "The owner role can't be changed." }), undefined;
+      // The owner always keeps everything; a plan that restates it is ignored.
+      if (roles[existing]!.owner) return;
       roles[existing] = { ...roles[existing]!, label: r.label, description: r.description, grants };
       origin.set(`roles.${existing}`, ["roles", i]);
     } else {
@@ -193,22 +235,32 @@ export function assemble(plan: BlueprintPlan): Assembly {
   };
 
   /* 9. approvals: a plan approval on the same record and action replaces the preset's */
-  const approvals = [...(bp.approvals ?? [])];
-  plan.approvals.forEach((a, i) => {
+  const approvals = ctx.presetApprovals === false ? [] : [...(bp.approvals ?? [])];
+  plan.approvals.forEach((a0, i) => {
+    let a = a0;
     const target = resolveRecord(a.record, ["approvals", i, "record"]);
     if (!target) return;
+    const action = approvableAction(a.record, a.action);
+    if (action === null) return notes.push(`Left out "${a.label}": ${a.action.replaceAll("_", " ")} on ${a.record.replaceAll("_", " ")} can't wait for approval.`), undefined;
+    // Records without an amount (delivery notes, batches) can't have amount thresholds: every stage applies from the start.
+    const noAmount = a.record in CORE_RECORDS && !CORE_RECORDS[a.record as CoreRecordKey].amountField;
+    if (noAmount && a.stages.some((st) => st.minAmount > 0)) {
+      a = { ...a, stages: a.stages.map((st) => ({ ...st, minAmount: 0 })), when: a.when && /\b(total|amount)\b/.test(a.when) ? undefined : a.when };
+      notes.push(`"${a.label}" applies to every ${a.record.replaceAll("_", " ")}, as ${a.record.replaceAll("_", " ")}s have no amount.`);
+    }
+    if (action !== a.action) notes.push(`"${a.label}" applies when the ${a.record.replaceAll("_", " ")} is ${action.replaceAll("_", " ")}d, the step that can wait for approval.`);
     const value = {
-      id: ids.make("apr", `${a.record}_${a.action}`),
+      id: ids.make("apr", `${a.record}_${action}`),
       label: a.label,
       target,
-      action: a.action,
+      action,
       when: a.when,
       channels: a.onlyFor?.length ? a.onlyFor : undefined,
       stages: [...a.stages]
         .sort((x, y) => x.minAmount - y.minAmount)
         .map((st, j) => ({ id: ids.make("aps", `${a.action}_${j}`), name: st.name, minAmount: st.minAmount, requireAll: st.requireAll, roles: st.roles.map((rk, k) => roleId(rk, ["approvals", i, "stages", j, "roles", k])) })),
     };
-    const same = approvals.findIndex((x) => x.target === target && x.action === a.action);
+    const same = approvals.findIndex((x) => x.target === target && x.action === action);
     if (same >= 0) approvals[same] = value;
     else approvals.push(value);
     origin.set(`approvals.${same >= 0 ? same : approvals.length - 1}`, ["approvals", i]);
@@ -231,6 +283,8 @@ export function assemble(plan: BlueprintPlan): Assembly {
         break;
       case "set":
         if (!r.field || !r.value) return issues.push({ planPath: p, message: `"Set" rules need a field and a value.` }), [];
+        if (r.record in CORE_RECORDS && (r.field === "status" || CORE_RECORDS[r.record as CoreRecordKey].fields.some((f) => f.key === r.field && f.system)))
+          return notes.push(`Left out the rule "${r.label}": ${r.field.replaceAll("_", " ")} is worked out by the system.`), [];
         then = { kind: "set", field: r.field, expr: r.value };
         break;
       case "discount_percent":
@@ -258,6 +312,21 @@ export function assemble(plan: BlueprintPlan): Assembly {
   const seed = (bp.seed ??= {});
   const production = { ...(seed.production ?? {}) };
   for (const k of ["resources", "parameters", "operationTypes", "qcTemplates"] as const) if (plan.seed[k]?.length) (production as Record<string, unknown>)[k] = plan.seed[k];
+  // Steps often name parameters that were never defined ("temperature"). Match them by code or name, else leave them off the step.
+  const params = (production.parameters ?? []) as { code: string; name: string }[];
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+  let unmatched = 0;
+  production.operationTypes = (production.operationTypes ?? []).map((o) => ({
+    ...o,
+    params: o.params && [...new Set(o.params.flatMap((c) => {
+      const hit = params.find((p) => p.code === c) ?? params.find((p) => norm(p.code) === norm(c) || norm(p.name) === norm(c));
+      if (!hit) unmatched++;
+      return hit ? [hit.code] : [];
+    }))],
+  }));
+  if (unmatched) notes.push(`Left ${unmatched === 1 ? "a process reading" : `${unmatched} process readings`} off the production steps, as ${unmatched === 1 ? "it isn't" : "they aren't"} in the parameter library yet. Add them in Settings, Production.`);
+  const resources = (production.resources ?? []) as { code: string; parent?: string }[];
+  production.resources = resources.map((r) => (r.parent && !resources.some((x) => x.code === r.parent) ? { ...r, parent: undefined } : r)) as typeof production.resources;
   seed.production = production;
 
   /* 13. validate */
@@ -270,6 +339,20 @@ export function assemble(plan: BlueprintPlan): Assembly {
     if (i.severity === "error") issues.push({ planPath: toPlanPath(origin, i.path), message: i.message });
   }
   return { input: bp, blueprint: issues.length ? undefined : parsed.data, issues, notes };
+}
+
+/**
+ * The action an approval on a core record should wait on: the action itself
+ * when it is approvable, the record's only approvable action when there is
+ * just one, otherwise null. Custom record types and create/update/delete are
+ * left to the validator.
+ */
+function approvableAction(record: string, action: string): string | null {
+  if (!(record in CORE_RECORDS) || ["create", "update", "delete"].includes(action)) return action;
+  const actions = CORE_RECORDS[record as CoreRecordKey].lifecycle?.actions ?? [];
+  if (actions.some((x) => x.key === action && x.approvable)) return action;
+  const approvable = actions.filter((x) => x.approvable && x.permission !== "void");
+  return approvable.length === 1 ? approvable[0]!.key : null;
 }
 
 const ENTITY_ACTIONS: readonly PermAction[] = ["view", "create", "edit", "approve", "void", "manage"];
@@ -311,8 +394,7 @@ function toGrants(
     }
     problem(j, `"${g.area}" isn't a screen or record type. Use a submodule key such as invoices, items, batches, sales_orders, customers, or a module key such as sales.`);
   });
-  const dropped = grants.filter((g) => g.actions.some((a) => !out.get(g.area)?.has(a)) && SUBMODULE_BY_KEY.has(g.area));
-  if (dropped.length) notes.push(`${roleLabel}: left out actions that don't apply to ${dropped.map((g) => g.area).join(", ")}.`);
+  // Actions a screen doesn't have are simply left off: a quiet fix, not something the person needs to check.
   return [...out.entries()].map(([target, set]) => ({ target, actions: [...set] }));
 }
 

@@ -12,3 +12,6 @@ export * from "./onboarding/interview";
 export * from "./onboarding/design";
 export * from "./assistant/tools";
 export * from "./assistant/run";
+export * from "./partial-json";
+export * from "./governance/approval";
+export * from "./onboarding/analytics";

@@ -136,3 +136,5 @@ export const Settings = z
   })
   .prefault({});
 export type Settings = z.infer<typeof Settings>;
+
+export type SettingsInput = z.input<typeof Settings>;

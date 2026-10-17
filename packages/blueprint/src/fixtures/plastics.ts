@@ -116,6 +116,16 @@ function build(): BlueprintInput {
     { id: "wdg_downtime", label: "Breakdown downtime this month", source: { kind: "aggregate", target: "ent_maint", agg: "sum", field: "downtime_min", filter: "kind = 'breakdown'", period: "month" } },
   ];
 
+  // Reports the owner looks at on the sales and production pages.
+  bp.reports = [
+    { key: "sales_summary", places: ["dashboard", "module", "reports"] },
+    { key: "aged_receivables", places: ["dashboard", "module", "reports"] },
+    { key: "open_orders", places: ["module", "reports"] },
+    { key: "production_status", places: ["dashboard", "module", "reports"] },
+    { key: "scrap_by_machine", places: ["dashboard", "module", "reports"] },
+    { key: "late_jobs", places: ["module", "reports"] },
+  ];
+
   // Machines and moulds on the floor.
   const seed = bp.seed ?? {};
   bp.seed = {

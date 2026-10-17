@@ -66,3 +66,67 @@ describe("AzureOpenAi", () => {
     expect(r.message.toolCalls).toEqual([{ id: "c1", name: "search_records", args: { record: "invoice" } }]);
   });
 });
+
+const sse = (chunks: unknown[]) =>
+  new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+const delta = (content?: string, extra: Record<string, unknown> = {}) => ({ model: "gpt-test", choices: [{ delta: { content, ...extra }, finish_reason: null }] });
+
+describe("AzureOpenAi streaming", () => {
+  it("streams JSON as it is written and returns the validated whole", async () => {
+    const impl = (async () => sse([delta('{"preset":"fo'), delta('od","note":"hi"'), delta(',"tags":[]}'), { choices: [], usage: { prompt_tokens: 5, completion_tokens: 4 } }])) as unknown as typeof fetch;
+    const seen: unknown[] = [];
+    const llm = new AzureOpenAi({ endpoint: "https://x.example", apiKey: "k", deployments: { chat: "dep" }, fetch: impl, hedgeMs: { chat: [] } });
+    const r = await llm.json({ messages: [{ role: "user", text: "hi" }], schema: Schema, onPartial: (p) => seen.push(p) });
+    expect(r.value).toEqual({ preset: "food", note: "hi", tags: [] });
+    expect(r.usage).toEqual({ input: 5, output: 4, model: "gpt-test" });
+    expect(seen.at(-1)).toEqual({ preset: "food", note: "hi", tags: [] });
+  });
+
+  it("assembles tool calls that arrive in pieces", async () => {
+    const impl = (async () =>
+      sse([
+        delta(undefined, { tool_calls: [{ index: 0, id: "c1", function: { name: "search_", arguments: '{"rec' } }] }),
+        delta(undefined, { tool_calls: [{ index: 0, function: { name: "records", arguments: 'ord":"invoice"}' } }] }),
+      ])) as unknown as typeof fetch;
+    const llm = new AzureOpenAi({ endpoint: "https://x.example", apiKey: "k", deployments: { chat: "dep" }, fetch: impl, hedgeMs: { chat: [] } });
+    const r = await llm.turn({ messages: [{ role: "user", text: "x" }], tools: [{ name: "search_records", description: "d", parameters: { type: "object", properties: {} } }] });
+    expect(r.message.toolCalls).toEqual([{ id: "c1", name: "search_records", args: { record: "invoice" } }]);
+  });
+
+  it("sends a backup when the first request is stuck in the queue, and keeps whichever starts first", async () => {
+    let n = 0;
+    const aborted: number[] = [];
+    const impl = ((_url: string, init: RequestInit) => {
+      const i = n++;
+      if (i === 0)
+        return new Promise((_, reject) => {
+          init.signal!.addEventListener("abort", () => (aborted.push(i), reject(Object.assign(new Error("aborted"), { name: "AbortError" }))));
+        });
+      return Promise.resolve(sse([delta("fast answer")]));
+    }) as unknown as typeof fetch;
+    const llm = new AzureOpenAi({ endpoint: "https://x.example", apiKey: "k", deployments: { chat: "dep" }, fetch: impl, hedgeMs: { chat: [20] } });
+    const text: string[] = [];
+    const r = await llm.turn({ messages: [{ role: "user", text: "x" }], tools: [], onText: (d) => text.push(d) });
+    expect(r.message.text).toBe("fast answer");
+    expect(text).toEqual(["fast answer"]);
+    expect(n).toBe(2);
+    expect(aborted).toEqual([0]);
+  });
+
+  it("doesn't send backups for a request the service refuses", async () => {
+    let n = 0;
+    const impl = (async () => (n++, new Response(JSON.stringify({ error: { message: "bad" } }), { status: 400 }))) as unknown as typeof fetch;
+    const llm = new AzureOpenAi({ endpoint: "https://x.example", apiKey: "k", deployments: { chat: "dep" }, fetch: impl, hedgeMs: { chat: [5, 10] } });
+    await expect(llm.turn({ messages: [{ role: "user", text: "x" }], tools: [] })).rejects.toThrow(/rejected the request/);
+    expect(n).toBe(1);
+  });
+
+  it("asks for low reasoning effort and streaming", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const impl = (async (_u: string, init: RequestInit) => (bodies.push(JSON.parse(String(init.body))), sse([delta("ok")]))) as unknown as typeof fetch;
+    const llm = new AzureOpenAi({ endpoint: "https://x.example", apiKey: "k", deployments: { chat: "dep" }, fetch: impl, reasoning: { chat: "low" } });
+    await llm.turn({ messages: [{ role: "user", text: "x", attachments: [{ name: "p.png", mime: "image/png", kind: "image", dataUrl: "data:image/png;base64,AA" }] }], tools: [] });
+    expect(bodies[0]).toMatchObject({ reasoning_effort: "low", stream: true, stream_options: { include_usage: true } });
+    expect((bodies[0]!.messages as { content: unknown }[])[0]!.content).toEqual([{ type: "text", text: "x" }, { type: "image_url", image_url: { url: "data:image/png;base64,AA", detail: "auto" } }]);
+  });
+});

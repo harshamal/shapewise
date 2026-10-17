@@ -49,7 +49,7 @@ export interface ApprovalDoc {
   envelope: CommandEnvelope;
   stages: ApprovalStageState[];
   stageIndex: number;
-  decisions: { stageId: string; by: string; byName?: string; decision: "approve" | "reject"; note?: string; at: string }[];
+  decisions: { stageId: string; by: string; byName?: string; roleId?: string; decision: "approve" | "reject"; note?: string; at: string }[];
   requestedBy: string;
   requestedByName?: string;
   createdAt: string;

@@ -34,7 +34,7 @@ describe("interview", () => {
         } as never;
       },
     };
-    const r = await interviewTurn(llm, { history: [], profile: {} }, "Lanka Bakes, we bake to order");
+    const r = await interviewTurn(llm, { history: [], profile: {} }, { message: "Lanka Bakes, we bake to order" });
     expect(system).toMatch(/Still unknown: business name/);
     expect(r.prompt).toMatchObject({ topic: "products", topicLabel: "What you sell", input: { kind: "multi" } });
     expect(r.history.at(-1)).toEqual({ role: "assistant", text: expect.stringContaining("(Offered: Birthday cakes · Bread · Short eats)") });

@@ -125,3 +125,9 @@ export async function userWorkspaces(db: Firestore, uid: string): Promise<{ id: 
   const tenants = (snap.data()?.tenants ?? {}) as Record<string, { name: string; roleKey: string }>;
   return Object.entries(tenants).map(([id, v]) => ({ id, name: v.name, roleKey: v.roleKey }));
 }
+
+/** How many members hold a role, so a role still in use isn't removed from under them. */
+export async function membersWithRole(db: Firestore, tid: string, roleKey: string): Promise<number> {
+  const snap = await db.collection(tenantPaths(tid).collection("members")).where("roleKey", "==", roleKey).limit(50).get();
+  return snap.size;
+}

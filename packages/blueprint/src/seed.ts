@@ -72,6 +72,11 @@ export const SeedResource = z.object({
 export const Seed = z
   .object({
     units: z.array(z.object({ code: Code, name: Label })).max(60).default([]),
+    /** Tax rates for the country and registrations (see jurisdiction.ts), created as tax codes. */
+    taxCodes: z
+      .array(z.object({ name: Label, rate: z.number().min(0).max(100), kind: z.enum(["vat", "sscl", "wht", "exempt", "zero_rated"]) }))
+      .max(20)
+      .default([]),
     itemClasses: z.array(z.object({ code: Code, name: Label, parent: Code.optional() })).max(100).default([]),
     warehouses: z
       .array(z.object({ code: Code, name: Label, kind: z.enum(["raw_material", "packaging", "wip", "finished_goods", "general"]).default("general") }))

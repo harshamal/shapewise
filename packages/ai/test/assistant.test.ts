@@ -111,3 +111,11 @@ describe("suggestions", () => {
     expect(splitSuggestions("Nothing is overdue.")).toEqual({ reply: "Nothing is overdue.", suggestions: [] });
   });
 });
+
+describe("proposals", () => {
+  it("leave out totals and amounts the system works out", async () => {
+    const proposals: Proposal[] = [];
+    await runTool(ctx(), "propose_change", { kind: "create", record: "sales_order", data: { customer: ids.perera, date: "2026-10-16", total: 999, sub_total: 999, lines: [{ item: ids.item, quantity: 2, unit_price: 10, amount: 20 }] }, summary: "Order" }, proposals);
+    expect(proposals[0]!.data).toEqual({ customer: ids.perera, date: "2026-10-16", lines: [{ item: ids.item, quantity: 2, unit_price: 10 }] });
+  });
+});

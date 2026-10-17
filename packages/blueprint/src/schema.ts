@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PermAction } from "./catalogue/actions";
 import { ExtensionKey } from "./catalogue/extensions";
 import { CoreRecordKey } from "./catalogue/records";
+import { REPORT_KEYS, REPORT_PLACES } from "./catalogue/reports";
 import { SECTIONS } from "./catalogue/modules";
 import { Field, ScalarField, Target, Tone } from "./fields";
 import {
@@ -329,6 +330,17 @@ export const Widget = z.object({
 });
 export type Widget = z.infer<typeof Widget>;
 
+/* ------------------------------------------------------------------ reports */
+
+/** A report this business uses, and where it shows up. Reports not listed are still in Reports, just not pinned anywhere. */
+export const ReportSetting = z.object({
+  key: z.enum(REPORT_KEYS),
+  places: z.array(z.enum(REPORT_PLACES)).min(1).max(REPORT_PLACES.length),
+  /** Only these roles see it; omit to follow each role's access to its module. */
+  roles: z.array(RoleId).optional(),
+});
+export type ReportSetting = z.infer<typeof ReportSetting>;
+
 /* ---------------------------------------------------------------- blueprint */
 
 export const LayerRef = z.object({ id: z.string().min(1).max(60), version: z.number().int().min(1) });
@@ -354,6 +366,7 @@ export const Blueprint = z.object({
   views: z.array(View).max(300).default([]),
   documents: z.array(DocumentTemplate).max(60).default([]),
   dashboard: z.array(Widget).max(24).default([]),
+  reports: z.array(ReportSetting).max(60).default([]),
   seed: Seed,
 });
 export type Blueprint = z.infer<typeof Blueprint>;
