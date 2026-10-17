@@ -11,6 +11,8 @@ export interface Session {
   name?: string;
   picture?: string;
   tenants: TenantClaims;
+  /** Signed in with a test account (SW_TEST_LOGIN), not Google. */
+  test?: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export const getSession = cache(async (): Promise<Session | null> => {
       name: typeof t.name === "string" ? t.name : undefined,
       picture: typeof t.picture === "string" ? t.picture : undefined,
       tenants: (t.tenants as TenantClaims | undefined) ?? {},
+      test: t.test === true || undefined,
     };
   } catch {
     // Expired, revoked or tampered: treat as signed out.

@@ -10,6 +10,8 @@ import {
   type Seed,
   type Settings,
 } from "@shapewise/blueprint";
+import type { ApprovalChoices } from "@shapewise/ai";
+import { permissionModel, type PermissionModel } from "./permissions";
 import type { Workspace } from "./workspace";
 
 /**
@@ -34,7 +36,22 @@ export interface SettingsData {
     blockedBy: string[];
   }[];
   roles: { id: string; label: string; description?: string; owner: boolean; grants: { label: string; actions: string[]; scope: string }[] }[];
-  approvals: { id: string; label: string; record: string; action: string; when?: string; channels?: string[]; stages: { name: string; minAmount: number; roles: string[]; requireAll: boolean }[] }[];
+  approvals: {
+    id: string;
+    label: string;
+    target: string;
+    record: string;
+    action: string;
+    actionLabel: string;
+    enabled: boolean;
+    when?: string;
+    channels?: string[];
+    stages: { id: string; name: string; minAmount: number; roles: string[]; roleIds: string[]; requireAll: boolean }[];
+  }[];
+  /** What an approval rule can be set on: screens with approvable actions, and the roles that can sign. */
+  approvalChoices: ApprovalChoices;
+  /** Roles against modules and screens, for the permissions editor. */
+  permissions: PermissionModel;
   customFields: { record: string; part: string; label: string; type: string; onDocuments: boolean; inProduction: boolean }[];
   numbering: { record: string; pattern: string; custom: boolean }[];
   seed: Seed;
@@ -80,12 +97,17 @@ export function settingsData(ws: Workspace): SettingsData {
     approvals: bp.approvals.map((a) => ({
       id: a.id,
       label: a.label,
+      target: a.target,
       record: recordLabel(a.target),
       action: a.action,
+      actionLabel: compiled.targets.get(a.target)?.actions.find((x) => x.key === a.action)?.label ?? a.action.replaceAll("_", " "),
+      enabled: a.enabled,
       when: a.when,
       channels: a.channels,
-      stages: a.stages.map((s) => ({ name: s.name, minAmount: s.minAmount, roles: s.roles.map(roleLabel), requireAll: s.requireAll })),
+      stages: a.stages.map((s) => ({ id: s.id, name: s.name, minAmount: s.minAmount, roles: s.roles.map(roleLabel), roleIds: [...s.roles], requireAll: s.requireAll })),
     })),
+    approvalChoices: approvalChoices(ws),
+    permissions: permissionModel(bp),
     customFields: bp.customFields.map((c) => ({ record: recordLabel(c.target), part: c.part, label: c.field.label, type: c.field.type, onDocuments: c.showOnDocuments, inProduction: c.showInProduction })),
     numbering: [...compiled.targets.values()]
       .filter((t) => t.numbering)
@@ -93,4 +115,22 @@ export function settingsData(ws: Workspace): SettingsData {
     seed: bp.seed,
     version: bp.version,
   };
+}
+
+/**
+ * The screens an approval can hold, with their approvable actions (plus
+ * create, which anything can wait on), and the roles that can approve.
+ */
+export function approvalChoices(ws: Workspace): ApprovalChoices {
+  const { bp, compiled } = ws;
+  const targets = [...compiled.targets.values()]
+    .map((t) => ({
+      target: t.target,
+      label: t.labelPlural,
+      hasAmount: Boolean(t.amountField),
+      actions: [...t.actions.filter((a) => a.approvable).map((a) => ({ key: a.key, label: a.label })), { key: "create", label: "Create" }],
+    }))
+    .filter((t) => t.actions.length > 1)
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return { currency: bp.business.currency, targets, roles: bp.roles.map((r) => ({ id: r.id, label: r.label })) };
 }

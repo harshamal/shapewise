@@ -4,8 +4,11 @@ import { revalidatePath } from "next/cache";
 import type { Command, CommandResult } from "@shapewise/runtime";
 import { z } from "zod";
 import { OverlayOp, applyOps } from "@shapewise/blueprint";
-import { BlueprintConflict, saveBlueprint } from "@shapewise/db";
+import { BlueprintConflict, membersWithRole, saveBlueprint } from "@shapewise/db";
+import { LlmError, createLlm, draftApproval, type ApprovalDraft } from "@shapewise/ai";
 import { adminDb } from "@/lib/auth/admin";
+import { approvalOps } from "@/lib/approval-ops";
+import { approvalChoices } from "@/lib/settings-data";
 import { executeIn, loadWorkspace, setDemoBlueprint } from "@/lib/workspace";
 
 /**
@@ -21,6 +24,8 @@ export interface ActionResult {
   message?: string;
   warnings?: string[];
   issues?: { path: (string | number)[]; message: string }[];
+  /** Why it failed, e.g. "validation" when something still has to be filled in. */
+  code?: string;
 }
 
 async function run(tenant: string, command: Command): Promise<ActionResult> {
@@ -29,7 +34,7 @@ async function run(tenant: string, command: Command): Promise<ActionResult> {
   revalidatePath(`/w/${tenant}`, "layout");
   if (r.status === "ok") return { ok: true, recordId: r.recordId, warnings: r.warnings.map((w) => w.message) };
   if (r.status === "pending_approval") return { ok: true, pending: true, message: `Sent for approval. ${r.reason}` };
-  return { ok: false, message: r.error.message, issues: r.error.issues };
+  return { ok: false, message: r.error.message, issues: r.error.issues, code: r.error.code };
 }
 
 export async function saveRecord(tenant: string, target: string, id: string | null, version: number | null, values: Record<string, unknown>) {
@@ -46,6 +51,11 @@ export async function convertRecord(tenant: string, from: string, id: string, to
   return run(tenant, { type: "record.convert", from: from as never, recordId: id, to: to as never });
 }
 
+/** Finishes a conversion from the pre-filled form: the form's values over what carries across, keeping the link to the source. */
+export async function convertWithValues(tenant: string, from: string, id: string, to: string, _r: string | null, _v: number | null, values: Record<string, unknown>) {
+  return run(tenant, { type: "record.convert", from: from as never, recordId: id, to: to as never, data: values });
+}
+
 export async function deleteRecord(tenant: string, target: string, id: string) {
   return run(tenant, { type: "record.delete", target, recordId: id });
 }
@@ -59,6 +69,14 @@ export async function changeSettings(tenant: string, ops: OverlayOp[]): Promise<
   if (!ws.compiled.can(ws.actor.roleKey, "extensions", "manage")) return { ok: false, message: "Your role can't change settings." };
   const parsed = z.array(OverlayOp).max(50).safeParse(ops);
   if (!parsed.success) return { ok: false, message: "That change isn't valid." };
+  // A role people still hold can't be removed: move them to another role first.
+  if (!ws.demo)
+    for (const op of parsed.data) {
+      const role = op.op === "remove" ? ws.bp.roles.find((x) => x.id === op.id) : undefined;
+      if (!role) continue;
+      const n = await membersWithRole(adminDb(), tenant, role.key);
+      if (n) return { ok: false, message: `${n} ${n === 1 ? "person has" : "people have"} the ${role.label} role. Give them another role in Team and users first.` };
+    }
   const r = applyOps(ws.bp, parsed.data);
   if (!r.ok) return { ok: false, message: r.issues[0]?.message ?? "That change isn't allowed.", issues: r.issues.map((i) => ({ path: i.path, message: i.message })) };
   const summary = r.summary.join("; ");
@@ -88,4 +106,36 @@ export async function changeSettings(tenant: string, ops: OverlayOp[]): Promise<
 
 export async function decideApproval(tenant: string, approvalId: string, decision: "approve" | "reject", note?: string) {
   return run(tenant, { type: "approval.decide", approvalId, decision, note: note || undefined });
+}
+
+export interface ApprovalDraftResult {
+  ok: boolean;
+  message?: string;
+  /** The AI couldn't tell what was meant; ask the person this. */
+  question?: string;
+  draft?: ApprovalDraft;
+  ops?: OverlayOp[];
+}
+
+/**
+ * Plain words → an approval rule, checked against the live setup but not
+ * saved. The person sees it in a sentence and confirms; the confirm goes
+ * through changeSettings, which validates everything again.
+ */
+export async function draftApprovalRule(tenant: string, request: string): Promise<ApprovalDraftResult> {
+  const ws = await loadWorkspace(tenant);
+  if (!ws.compiled.can(ws.actor.roleKey, "extensions", "manage")) return { ok: false, message: "Your role can't change settings." };
+  const text = z.string().trim().min(3).max(1000).safeParse(request);
+  if (!text.success) return { ok: false, message: "Describe the rule in a sentence." };
+  try {
+    const choices = approvalChoices(ws);
+    const r = await draftApproval(createLlm(), choices, text.data);
+    if (!r.ok) return { ok: true, question: r.question };
+    const ops = approvalOps(r.draft);
+    const check = applyOps(ws.bp, ops);
+    if (!check.ok) return { ok: false, message: `That rule wouldn't work: ${check.issues[0]?.message ?? "it doesn't fit the setup"}` };
+    return { ok: true, draft: r.draft, ops };
+  } catch (e) {
+    return { ok: false, message: e instanceof LlmError ? e.message : "The AI couldn't draft that just now. Try again." };
+  }
 }

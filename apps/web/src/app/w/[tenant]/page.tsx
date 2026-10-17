@@ -1,6 +1,9 @@
 import { EXTENSION_BY_KEY, MODULES, type Widget } from "@shapewise/blueprint";
 import { StatusPill } from "@shapewise/ui";
+import type { TileValue } from "@shapewise/runtime/reports";
+import { HeadlineValue, WaitingNote, formatUnit } from "@/components/report-view";
 import { WorkspaceShell } from "@/components/workspace-shell";
+import { tilesFor } from "@/lib/reports";
 import { loadWorkspace, shellProps } from "@/lib/workspace";
 
 const METRIC_LABELS: Record<string, string> = {
@@ -31,16 +34,18 @@ export default async function Overview({ params }: { params: Promise<{ tenant: s
   const { tenant } = await params;
   const ws = await loadWorkspace(tenant);
   const { bp } = ws;
+  const tiles = await tilesFor(ws);
+  const widgets = bp.dashboard.filter((w) => tiles.has(w.id));
   const modules = MODULES.filter((m) => !m.core && bp.modules.some((c) => c.key === m.key && c.enabled)).map((m) => m.label);
 
   return (
     <WorkspaceShell {...shellProps(ws)} title="Overview">
       <section aria-labelledby="metrics" className="grid gap-px overflow-hidden rounded-sw border bg-border sm:grid-cols-2 lg:grid-cols-4">
         <h2 id="metrics" className="sr-only">Key figures</h2>
-        {bp.dashboard.map((w) => (
+        {widgets.map((w) => (
           <div key={w.id} className={`bg-surface p-4 ${w.size === "md" ? "sm:col-span-2" : w.size === "lg" ? "sm:col-span-2 lg:col-span-4" : ""}`}>
             <p className="text-sm text-ink-muted">{widgetLabel(w)}</p>
-            <p className="tabular mt-1 text-2xl font-medium">—</p>
+            <Tile v={tiles.get(w.id)!} currency={bp.business.currency} wide={w.size !== "sm"} />
           </div>
         ))}
       </section>
@@ -69,6 +74,25 @@ export default async function Overview({ params }: { params: Promise<{ tenant: s
         </div>
       </section>
     </WorkspaceShell>
+  );
+}
+
+function Tile({ v, currency, wide }: { v: TileValue; currency: string; wide: boolean }) {
+  if (v.state === "waiting") return <WaitingNote engine={v.engine} compact />;
+  return (
+    <div className="mt-1">
+      <HeadlineValue h={v} currency={currency} />
+      {wide && v.items && v.items.length > 1 && (
+        <ul className="mt-2 space-y-0.5 text-[13px] text-ink-muted">
+          {v.items.slice(1).map((i) => (
+            <li key={i.label} className="flex justify-between gap-3">
+              <span className="truncate">{i.label}</span>
+              <span className="tabular">{formatUnit(v.unit, i.value, currency)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -57,7 +57,7 @@ export function WorkspaceShell({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+      if ((e.ctrlKey || e.metaKey) && e.key === "," && settings.tabs.length) {
         e.preventDefault();
         openSettings();
       }
@@ -68,7 +68,7 @@ export function WorkspaceShell({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openSettings]);
+  }, [openSettings, settings.tabs.length]);
   const [askOpen, setAskOpen] = useState(false);
   const tenant = base.split("/").pop() ?? "";
 
@@ -123,6 +123,8 @@ export function WorkspaceShell({
           ))}
         </nav>
 
+        {/* Roles with no settings screens don't get an empty Settings window. */}
+        {settings.tabs.length > 0 && (
         <div className="border-t border-white/10 px-3 pt-2">
           <button
             type="button"
@@ -135,6 +137,7 @@ export function WorkspaceShell({
             <kbd className="ml-auto text-[11px] text-rail-muted/70">Ctrl ,</kbd>
           </button>
         </div>
+        )}
         <div className="space-y-1 px-5 py-3 text-sm">
           <p className="truncate text-rail-muted">{workspaceName}</p>
           <AccountMenu viewer={viewer} here={pathname} />

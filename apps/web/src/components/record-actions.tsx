@@ -72,7 +72,23 @@ export function RecordActions({
           );
         })}
         {converts.map((c) => (
-          <Button key={c.to} size="sm" disabled={busy} onClick={() => go(() => convertRecord(tenant, target, id, c.to), (r) => r.recordId && router.push(`${c.href}/${r.recordId}` as never))}>
+          <Button
+            key={c.to}
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              start(async () => {
+                const r = await convertRecord(tenant, target, id, c.to);
+                // Something the new document needs isn't on this one (a warehouse, prices): finish it in its form.
+                if (!r.ok && r.code === "validation") return router.push(`${c.href}/new?from=${encodeURIComponent(target)}&id=${encodeURIComponent(id)}` as never);
+                setResult(r);
+                if (r.ok) {
+                  if (r.recordId) router.push(`${c.href}/${r.recordId}` as never);
+                  router.refresh();
+                }
+              })
+            }
+          >
             {c.label}
           </Button>
         ))}

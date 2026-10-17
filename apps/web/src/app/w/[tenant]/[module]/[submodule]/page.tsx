@@ -1,21 +1,34 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { titleOf, type CField, type CTarget } from "@shapewise/runtime";
+import { REPORT_CATEGORIES, REPORT_CATEGORY_LABEL, type ReportKey } from "@shapewise/blueprint";
+import { PERIOD_LABEL, hasPeriod, type PeriodKey } from "@shapewise/runtime/reports";
 import { StatusPill, type Tone } from "@shapewise/ui";
 import { ApprovalsInbox } from "@/components/approvals-inbox";
+import { ReportCard, ReportView } from "@/components/report-view";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { formatValue, isNumeric } from "@/lib/format";
 import { canCreate, listRecords, refTitles, targetFor } from "@/lib/records";
+import { ANALYTICS_MODULE, asPeriod, reportsHref, runFor, visibleReports } from "@/lib/reports";
 import { loadWorkspace, shellProps, type Workspace } from "@/lib/workspace";
 
 const MAX_COLUMNS = 6;
 
-export default async function SubmodulePage({ params }: { params: Promise<{ tenant: string; module: string; submodule: string }> }) {
+export default async function SubmodulePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ tenant: string; module: string; submodule: string }>;
+  searchParams: Promise<{ r?: string; p?: string }>;
+}) {
   const { tenant, module, submodule } = await params;
+  const query = await searchParams;
   const ws = await loadWorkspace(tenant);
   // Settings live in the popup; old links open it on the right section.
   if (module === "settings") redirect(`${ws.base}?settings=${encodeURIComponent(submodule)}` as never);
-  const { nav, t } = targetFor(ws, module, submodule);
+  const { nav, t, module: mod } = targetFor(ws, module, submodule);
+  // A module opens on its first screen; reports the business placed on the module show there.
+  const landing = mod.submodules[0]?.key === submodule;
   const here = `${ws.base}/${module}/${submodule}`;
 
   return (
@@ -30,21 +43,78 @@ export default async function SubmodulePage({ params }: { params: Promise<{ tena
         ) : undefined
       }
     >
+      {landing && <ModuleReports ws={ws} module={module} />}
       {t ? (
         <RecordList ws={ws} t={t} here={here} />
       ) : submodule === "approvals" ? (
         <ApprovalsInbox ws={ws} />
       ) : submodule === "audit_log" ? (
         <AuditLog ws={ws} />
+      ) : nav.kind === "report" && (submodule === "reports" || ANALYTICS_MODULE[submodule]) ? (
+        <ReportsScreen ws={ws} here={here} only={ANALYTICS_MODULE[submodule]} pick={query.r} period={asPeriod(query.p)} />
       ) : (
         <div className="rounded-sw border bg-surface px-6 py-12 text-center">
           <p className="text-sm font-medium">{nav.label}</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-ink-muted">
-            {nav.kind === "report" ? "This report reads from the ledger and stock, which arrive with the engines." : "A purpose-built screen that arrives with its engine."}
+            {nav.kind === "report" ? "This report starts with the accounting engine, which posts every document to the ledger." : "A purpose-built screen that arrives with its engine."}
           </p>
         </div>
       )}
     </WorkspaceShell>
+  );
+}
+
+/* ---------------------------------------------------------------- reports */
+
+async function ReportsScreen({ ws, here, only, pick, period }: { ws: Workspace; here: string; only?: string; pick?: string; period?: PeriodKey }) {
+  const all = visibleReports(ws).filter((r) => !only || r.def.module === only);
+  if (!all.length) return <p className="rounded-sw border bg-surface px-6 py-12 text-center text-sm text-ink-muted">There are no reports here that your role can see.</p>;
+  const chosen = all.find((r) => r.def.key === pick) ?? all[0]!;
+  const [result] = await runFor(ws, [chosen.def.key as ReportKey], period);
+  const href = (key: string, p?: string) => `${here}?r=${key}${p ? `&p=${p}` : ""}`;
+  const periods = hasPeriod(chosen.def.key) ? (["week", "month", "last_month", "quarter", "year"] as const).map((k) => ({ key: k, label: PERIOD_LABEL[k], href: href(chosen.def.key, k) })) : undefined;
+  const groups = REPORT_CATEGORIES.map((c) => ({ c, items: all.filter((r) => r.def.category === c) })).filter((g) => g.items.length);
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[15rem_1fr]">
+      <nav aria-label="Reports" className="space-y-4 text-sm">
+        {groups.map(({ c, items }) => (
+          <div key={c}>
+            {groups.length > 1 && <p className="mb-1 px-2 text-xs font-medium text-ink-faint">{REPORT_CATEGORY_LABEL[c]}</p>}
+            <ul>
+              {items.map((r) => (
+                <li key={r.def.key}>
+                  <Link
+                    href={href(r.def.key) as never}
+                    aria-current={r.def.key === chosen.def.key ? "page" : undefined}
+                    className={`flex items-center justify-between gap-2 rounded-sw px-2 py-1.5 ${r.def.key === chosen.def.key ? "bg-accent-soft text-ink" : "text-ink-muted hover:bg-surface-sunken hover:text-ink"}`}
+                  >
+                    <span className="truncate">{r.def.label}</span>
+                    {r.def.source !== "records" && <span className="shrink-0 text-xs text-ink-faint">Soon</span>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+      <div className="min-w-0">{result && <ReportView r={result} currency={ws.bp.business.currency} periods={periods} />}</div>
+    </div>
+  );
+}
+
+/** Reports the business placed on this module, as short cards above its first screen. */
+async function ModuleReports({ ws, module }: { ws: Workspace; module: string }) {
+  const placed = visibleReports(ws).filter((r) => r.def.module === module && r.setting?.places.includes("module"));
+  if (!placed.length) return null;
+  const results = await runFor(ws, placed.map((r) => r.def.key as ReportKey));
+  const full = reportsHref(ws);
+  return (
+    <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {results.map((r) => (
+        <ReportCard key={r.key} r={r} currency={ws.bp.business.currency} href={full ? `${full}?r=${r.key}` : undefined} />
+      ))}
+    </div>
   );
 }
 

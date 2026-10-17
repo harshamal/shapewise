@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminAuth } from "@/lib/auth/admin";
-import { RECENT_SIGN_IN_SECONDS, SESSION_COOKIE, SESSION_DAYS, sameOrigin } from "@/lib/auth/policy";
+import { sessionResponse } from "@/lib/auth/issue-session";
+import { RECENT_SIGN_IN_SECONDS, SESSION_COOKIE, sameOrigin } from "@/lib/auth/policy";
 
 /**
  * Exchanges a fresh Firebase ID token for an httpOnly session cookie, so
@@ -23,17 +24,7 @@ export async function POST(req: NextRequest) {
     if (Date.now() / 1000 - decoded.auth_time > RECENT_SIGN_IN_SECONDS) {
       return NextResponse.json({ error: "Please sign in again" }, { status: 401 });
     }
-    const expiresIn = SESSION_DAYS * 24 * 60 * 60 * 1000;
-    const cookie = await adminAuth().createSessionCookie(idToken, { expiresIn });
-    const res = NextResponse.json({ ok: true });
-    res.cookies.set(SESSION_COOKIE, cookie, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: expiresIn / 1000,
-    });
-    return res;
+    return await sessionResponse(idToken);
   } catch (e) {
     const code = (e as { code?: string }).code ?? "";
     if (code.startsWith("auth/")) {

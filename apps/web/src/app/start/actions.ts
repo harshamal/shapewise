@@ -1,13 +1,12 @@
 "use server";
 
-import { z } from "zod";
-import { BusinessProfile, LlmError, OPENING, createLlm, designBlueprint, interviewTurn, profileReady, type InterviewPrompt, type Message } from "@shapewise/ai";
 import { Blueprint, PRESET_BY_KEY, presetBlueprint, validateBlueprint } from "@shapewise/blueprint";
 import { WorkspaceIdTaken, createTenant, suggestWorkspaceId, workspaceIdProblem } from "@shapewise/db";
 import { adminAuth, adminDb } from "@/lib/auth/admin";
 import { withMembership } from "@/lib/auth/policy";
 import { getSession } from "@/lib/auth/session";
-import { summarise, type BlueprintSummary } from "@/lib/blueprint-summary";
+import { seedStarterRecords } from "@shapewise/runtime";
+import { executeIn, loadWorkspace } from "@/lib/workspace";
 
 export interface CreateResult {
   ok: boolean;
@@ -40,7 +39,24 @@ async function finishCreate(name: string, id: string, bp: Blueprint): Promise<Cr
   } catch (e) {
     console.warn("start: couldn't update sign-in claims; membership still recorded", e instanceof Error ? e.message : e);
   }
+  await seedStarter(id, checked.blueprint);
   return { ok: true, id };
+}
+
+/**
+ * What a new workspace needs before its first document can be finished:
+ * chart of accounts, stores, cash and bank accounts, tax rates. Created
+ * through the pipeline as the new owner. A failure here leaves a working
+ * workspace; anything missing can be added by hand.
+ */
+async function seedStarter(id: string, bp: Blueprint) {
+  try {
+    const ws = await loadWorkspace(id);
+    const r = await seedStarterRecords(bp, { run: (command) => executeIn(ws, command), list: (target) => ws.store.read(ws.tenant, (tx) => tx.list(target)) });
+    if (r.problems.length) console.warn(`start: some starter records weren't created: ${r.problems.slice(0, 3).join("; ")}`);
+  } catch (e) {
+    console.warn("start: couldn't create starter records", e instanceof Error ? e.message : e);
+  }
 }
 
 /** Template path: a workspace from an industry preset. */
@@ -52,69 +68,6 @@ export async function createWorkspace(input: { name: string; id: string; preset:
   const bp = validateBlueprint(presetBlueprint(input.preset, { name, currency: "LKR", locale: "en-LK", timezone: "Asia/Colombo" }));
   if (!bp.blueprint) return { ok: false, message: "That setup couldn't be prepared. Please try another kind of business." };
   return finishCreate(name, id, bp.blueprint);
-}
-
-/* ------------------------------------------------------------- AI interview */
-
-const ChatMessage = z.union([z.object({ role: z.literal("user"), text: z.string().max(4000) }), z.object({ role: z.literal("assistant"), text: z.string().max(4000) })]);
-const InterviewInput = z.object({ history: z.array(ChatMessage).max(60), profile: BusinessProfile, message: z.string().min(1).max(4000) });
-
-export interface InterviewResult {
-  ok: boolean;
-  history?: Message[];
-  profile?: BusinessProfile;
-  prompt?: InterviewPrompt;
-  ready?: boolean;
-  message?: string;
-}
-
-export async function interviewStep(input: unknown): Promise<InterviewResult> {
-  if (!(await getSession())) return { ok: false, message: "Please sign in first." };
-  const parsed = InterviewInput.safeParse(input);
-  if (!parsed.success) return { ok: false, message: "That message couldn't be sent. Reload and try again." };
-  try {
-    const llm = createLlm();
-    const history = parsed.data.history.length ? parsed.data.history : [{ role: "assistant" as const, text: OPENING }];
-    const r = await interviewTurn(llm, { history, profile: parsed.data.profile }, parsed.data.message);
-    return { ok: true, history: r.history, profile: r.profile, prompt: r.prompt, ready: r.ready };
-  } catch (e) {
-    return { ok: false, message: e instanceof LlmError ? e.message : "Something went wrong talking to the AI. Try again." };
-  }
-}
-
-/* --------------------------------------------------------------- AI design */
-
-export interface DesignResult {
-  ok: boolean;
-  message?: string;
-  blueprint?: Blueprint;
-  summary?: BlueprintSummary;
-  suggestedId?: string;
-  assumptions?: string[];
-  notes?: string[];
-  removed?: string[];
-}
-
-export async function designSetup(profileInput: unknown): Promise<DesignResult> {
-  if (!(await getSession())) return { ok: false, message: "Please sign in first." };
-  const parsed = BusinessProfile.safeParse(profileInput);
-  if (!parsed.success) return { ok: false, message: "The interview answers couldn't be read. Start again." };
-  if (!profileReady(parsed.data)) return { ok: false, message: "Tell me a bit more first: the business name, what you sell, who buys, and whether you make things." };
-  try {
-    const r = await designBlueprint(createLlm(), parsed.data);
-    console.info(`start: designed blueprint (first pass ${r.firstPassValid ? "valid" : "invalid"}, ${r.repairRounds} repairs, ${r.removed.length} removed)`);
-    return {
-      ok: true,
-      blueprint: r.blueprint,
-      summary: summarise(r.blueprint),
-      suggestedId: suggestWorkspaceId(r.blueprint.business.name),
-      assumptions: r.plan.assumptions,
-      notes: r.notes,
-      removed: r.removed,
-    };
-  } catch (e) {
-    return { ok: false, message: e instanceof LlmError ? e.message : "Something went wrong designing the setup. Try again." };
-  }
 }
 
 /** Creates the workspace from a designed blueprint (validated again on the server). */

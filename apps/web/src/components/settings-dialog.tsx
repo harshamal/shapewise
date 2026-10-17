@@ -6,6 +6,8 @@ import type { OverlayOp } from "@shapewise/blueprint";
 import { Button, Input, Select, StatusPill, cx } from "@shapewise/ui";
 import { changeSettings } from "@/app/w/[tenant]/actions";
 import type { SettingsData } from "@/lib/settings-data";
+import { ApprovalRules } from "./approval-rules";
+import { RoleMatrix } from "./role-matrix";
 
 /**
  * Settings as a popup, like SyncBooks: sections on the left (searchable),
@@ -113,7 +115,7 @@ function Section({ data, tab }: { data: SettingsData; tab: string }) {
         />
       );
     case "approval_rules":
-      return <Approvals data={data} />;
+      return <ApprovalRules data={data} />;
     case "numbering":
       return <Table head={["Record", "Pattern", ""]} rows={data.numbering.map((n) => [n.record, <code key="p" className="text-[13px]">{n.pattern}</code>, n.custom ? "Customised" : ""])} note="{yyyy} year · {mm} month · {seq:5} counter with 5 digits. Counters are gap-free and restart each year when the pattern has a year." />;
     case "document_rules":
@@ -351,25 +353,13 @@ function Users({ data }: { data: SettingsData }) {
 }
 
 function Roles({ data }: { data: SettingsData }) {
-  const [open, setOpen] = useState(data.roles[0]?.id);
+  const { apply, pending, status } = useApply(data.tenant);
   return (
-    <ul className="space-y-2">
-      {data.roles.map((r) => (
-        <li key={r.id} className="rounded-sw border bg-surface">
-          <button type="button" aria-expanded={open === r.id} onClick={() => setOpen(open === r.id ? undefined : r.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
-            <span className="font-medium">{r.label}</span>
-            {r.owner && <StatusPill tone="info">Owner</StatusPill>}
-            <span className="flex-1 truncate text-sm text-ink-muted">{r.description}</span>
-            <span className="text-sm text-ink-muted">{r.grants.length} area{r.grants.length === 1 ? "" : "s"}</span>
-          </button>
-          {open === r.id && (
-            <div className="border-t px-4 py-3">
-              <Table head={["Area", "Can", "Which records"]} rows={r.grants.map((g) => [g.label, g.actions.join(", "), g.scope])} />
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-3">
+      <p className="text-sm text-ink-muted">What each role can do in each module. Open a module to set it screen by screen. The owner always has full access.</p>
+      <RoleMatrix model={data.permissions} onChange={apply} busy={pending} canEdit={data.canManage} />
+      <StatusLine status={status} />
+    </div>
   );
 }
 
@@ -406,40 +396,6 @@ function Extensions({ data }: { data: SettingsData }) {
         </section>
       ))}
     </div>
-  );
-}
-
-function Approvals({ data }: { data: SettingsData }) {
-  if (!data.approvals.length) return <p className="text-sm text-ink-muted">Nothing needs approval.</p>;
-  return (
-    <ul className="space-y-2">
-      {data.approvals.map((a) => (
-        <li key={a.id} className="rounded-sw border bg-surface px-4 py-3 text-sm">
-          <p className="font-medium">{a.label}</p>
-          <p className="text-ink-muted">
-            {a.record} · when someone tries to {a.action.replaceAll("_", " ")}
-            {a.channels && ` · only from ${a.channels.join(", ")}`}
-            {a.when && (
-              <>
-                {" "}
-                · if <code className="text-[13px]">{a.when}</code>
-              </>
-            )}
-          </p>
-          <ol className="mt-2 flex flex-wrap items-center gap-1.5">
-            {a.stages.map((s, i) => (
-              <li key={s.name + i} className="flex items-center gap-1.5">
-                {i > 0 && <span className="text-ink-faint">then</span>}
-                <StatusPill tone="neutral">
-                  {s.roles.join(s.requireAll ? " and " : " or ")}
-                  {s.minAmount > 0 ? ` from Rs ${s.minAmount.toLocaleString("en-LK")}` : ""}
-                </StatusPill>
-              </li>
-            ))}
-          </ol>
-        </li>
-      ))}
-    </ul>
   );
 }
 

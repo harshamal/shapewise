@@ -4,7 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { Blueprint, navigation } from "@shapewise/blueprint";
 import { bakery, plasticsFactory } from "@shapewise/blueprint/fixtures";
 import { FirestoreStore, loadBlueprint, memberRole } from "@shapewise/db";
-import { MemoryStore, compile, createExecutor, type Actor, type Command, type CommandResult, type Store } from "@shapewise/runtime";
+import { MemoryStore, compile, createExecutor, type Actor, type Command, type CommandResult, type Compiled, type Store } from "@shapewise/runtime";
+import { seedDemoRecords } from "@shapewise/runtime/reports";
 import { adminDb } from "./auth/admin";
 import { getSession } from "./auth/session";
 import { PUBLIC_TENANTS, roleIn } from "./auth/policy";
@@ -16,12 +17,23 @@ const DEMOS = { demo: plasticsFactory, bakery } as const;
  * Demo workspaces live in memory (open to anyone, reset when the server
  * restarts, never touching the database). Real workspaces live in Firestore.
  */
-const g = globalThis as typeof globalThis & { __swStore?: MemoryStore; __swBlueprints?: Map<string, Blueprint>; __swFirestore?: FirestoreStore };
+const g = globalThis as typeof globalThis & { __swStore?: MemoryStore; __swBlueprints?: Map<string, Blueprint>; __swFirestore?: FirestoreStore; __swDemoData?: Map<string, Promise<unknown>> };
 const memoryStore = (g.__swStore ??= new MemoryStore());
 const demoBlueprints = (g.__swBlueprints ??= new Map<string, Blueprint>());
+const demoData = (g.__swDemoData ??= new Map());
 const firestoreStore = () => (g.__swFirestore ??= new FirestoreStore(adminDb()));
 
 export const isDemo = (tenant: string) => tenant in DEMOS;
+
+/** A demo starts with a few months of sample trading, written once per server start. */
+function withDemoData(tenant: string, compiled: Compiled) {
+  let p = demoData.get(tenant);
+  if (!p) {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: compiled.bp.business.timezone }).format(new Date());
+    demoData.set(tenant, (p = seedDemoRecords(memoryStore, tenant, compiled, today).catch((e) => console.error("demo: sample data failed", e))));
+  }
+  return p;
+}
 
 /** A changed demo blueprint, kept in memory until restart. */
 export function setDemoBlueprint(tenant: string, bp: Blueprint) {
@@ -65,6 +77,7 @@ export const loadWorkspace = cache(async (tenant: string) => {
   }
 
   const compiled = compile(bp);
+  if (isDemo(tenant)) await withDemoData(tenant, compiled);
   // Visitors to the public demos act as the owner, so every screen can be tried.
   const roleKey = role ?? bp.roles.find((r) => r.owner)!.key;
   const actor: Actor = session
@@ -77,9 +90,10 @@ export const loadWorkspace = cache(async (tenant: string) => {
     compiled,
     actor,
     store,
-    sections: navigation(bp),
+    // Only what this role may open: every page finds itself through these, so this also guards direct links.
+    sections: viewable(navigation(bp), compiled, roleKey),
     base: `/w/${tenant}`,
-    viewer: session ? { name: session.name ?? session.email ?? "Signed in", role } : null,
+    viewer: session ? { name: `${session.name ?? session.email ?? "Signed in"}${session.test ? " (test)" : ""}`, role } : null,
   };
 });
 
@@ -107,3 +121,11 @@ async function getSessionSafe() {
 }
 
 export { PUBLIC_TENANTS };
+
+/** Navigation limited to the screens a role can view; modules and sections left empty disappear. */
+function viewable(sections: ReturnType<typeof navigation>, compiled: ReturnType<typeof compile>, roleKey: string) {
+  const keyOf = (s: { key: string; entity?: string }) => (s.entity ? (compiled.bp.entities.find((e) => e.id === s.entity)?.key ?? s.key) : s.key);
+  return sections
+    .map((sec) => ({ ...sec, modules: sec.modules.map((m) => ({ ...m, submodules: m.submodules.filter((s) => compiled.can(roleKey, keyOf(s), "view")) })).filter((m) => m.submodules.length) }))
+    .filter((sec) => sec.modules.length);
+}

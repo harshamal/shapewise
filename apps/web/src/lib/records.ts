@@ -1,7 +1,7 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { findNav } from "@shapewise/blueprint";
-import { deletable, editable, titleOf, type CField, type CTarget, type StoredRecord } from "@shapewise/runtime";
+import { deletable, editable, titleOf, visibleTo, type CField, type CTarget, type StoredRecord } from "@shapewise/runtime";
 import type { Workspace } from "./workspace";
 import { toInput, type FieldSpec, type FormSpec, type RefTitles } from "./format";
 
@@ -25,14 +25,16 @@ export function formSpec(ws: Workspace, t: CTarget): FormSpec {
   };
 }
 
+/** The records a person may see: all of them, or only their own where their role is limited to that. */
 export async function listRecords(ws: Workspace, t: CTarget): Promise<StoredRecord[]> {
   const rows = await ws.store.read(ws.tenant, (tx) => tx.list(t.target));
-  return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return rows.filter((r) => visibleTo(ws.compiled, ws.actor.roleKey, ws.actor.id, t, r)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function getRecord(ws: Workspace, t: CTarget, id: string): Promise<StoredRecord> {
   const rec = await ws.store.read(ws.tenant, (tx) => tx.get(t.target, id));
-  if (!rec) notFound();
+  // Someone else's record, for a role limited to its own, is treated as not there.
+  if (!rec || !visibleTo(ws.compiled, ws.actor.roleKey, ws.actor.id, t, rec)) notFound();
   return rec;
 }
 
