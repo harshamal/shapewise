@@ -5,6 +5,7 @@ import { WorkspaceIdTaken, createTenant, suggestWorkspaceId, workspaceIdProblem 
 import { adminAuth, adminDb } from "@/lib/auth/admin";
 import { withMembership } from "@/lib/auth/policy";
 import { getSession } from "@/lib/auth/session";
+import { confirmFirst, emailConfirmed } from "@/lib/auth/confirm";
 import { seedStarterRecords } from "@shapewise/runtime";
 import { executeIn, loadWorkspace } from "@/lib/workspace";
 
@@ -19,6 +20,7 @@ export interface CreateResult {
 async function finishCreate(name: string, id: string, bp: Blueprint): Promise<CreateResult> {
   const session = await getSession();
   if (!session) return { ok: false, message: "Please sign in first." };
+  if (!(await emailConfirmed(session))) return { ok: false, message: confirmFirst(session.email) };
   const problem = workspaceIdProblem(id);
   if (problem) return { ok: false, field: "id", message: problem };
   const checked = validateBlueprint({ ...bp, version: 1, business: { ...bp.business, name } });

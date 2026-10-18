@@ -234,7 +234,10 @@ export function compile(bp: Blueprint): Compiled {
     can(roleKey, submodule, action) {
       if (owners.has(roleKey)) return true;
       const m = perms.get(roleKey);
-      return Boolean(m?.get("*")?.has(action) || m?.get(submodule)?.has(action));
+      if (m?.get("*")?.has(action) || m?.get(submodule)?.has(action)) return true;
+      // Selling at the till is creating POS sales, and opening, counting and closing shifts, so the terminal's permission carries them.
+      const till = (submodule === "pos_sales" && action === "create") || (submodule === "pos_shifts" && (action === "create" || action === "edit"));
+      return till && Boolean(m?.get("pos_terminal")?.has("create"));
     },
     scope(roleKey, submodule) {
       if (owners.has(roleKey)) return "all";

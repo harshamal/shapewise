@@ -14,40 +14,32 @@ const GOOGLE_MESSAGES: Record<string, string> = {
   "auth/network-request-failed": "Couldn't reach Google. Check your connection and try again.",
 };
 
-const DEMO_ACCOUNTS = [
-  { label: "Claude (Owner)", identifier: "claude.tester@shapewise.test", password: "snZpWBPFUm776tqR" },
-  { label: "Sales", identifier: "sales.tester@shapewise.test", password: "7hllkDDXA-pn_Ur_" },
-  { label: "Stores", identifier: "sandy.stores@shapewise.test", password: "Nbqfr-pFiGh2XiX9" },
-];
+type TestAccount = { label: string; identifier: string; password: string };
 
-export function SignInForm({
-  next,
-  initialMode = "signin",
-  testLogin = false,
-}: {
-  next: string;
-  initialMode?: "signin" | "signup";
-  testLogin?: boolean;
-}) {
+/**
+ * Sign in with an email (or username) and password, or create an account
+ * with just an email and password. Test accounts come from the server, and
+ * only when test login is switched on.
+ */
+export function SignInForm({ next, initialMode = "signin", testAccounts = [] }: { next: string; initialMode?: "signin" | "signup"; testAccounts?: TestAccount[] }) {
   const router = useRouter();
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-
-  // Form states for controlled demo quick-fill
+  // One field for both modes: an email when signing up, an email or username when signing in.
   const [identifier, setIdentifier] = useState("");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  // Waiting for the person to open the confirmation email.
+  const [pending, setPending] = useState<{ email: string; note: string | null } | null>(null);
 
   function switchMode(m: "signin" | "signup") {
     setMode(m);
     setError(null);
+    setPending(null);
   }
 
-  function fillDemo(acc: (typeof DEMO_ACCOUNTS)[0]) {
+  function fillDemo(acc: TestAccount) {
     setMode("signin");
     setIdentifier(acc.identifier);
     setPassword(acc.password);
@@ -86,7 +78,7 @@ export function SignInForm({
     try {
       const payload =
         mode === "signup"
-          ? { mode: "signup", username, email, name: name.trim() || undefined, password }
+          ? { mode: "signup", email: identifier, password }
           : { mode: "signin", identifier, password };
 
       const res = await fetch("/api/auth/credentials", {
@@ -95,9 +87,17 @@ export function SignInForm({
         body: JSON.stringify(payload),
       });
 
+      const data = (await res.json().catch(() => ({}))) as { error?: string; confirm?: boolean; email?: string; sent?: boolean; message?: string; unconfirmed?: boolean };
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        if (data.unconfirmed) setPending({ email: data.email ?? identifier, note: null });
         throw new Error(data.error ?? "Authentication failed.");
+      }
+      // A new account isn't signed in until its email is confirmed.
+      if (data.confirm) {
+        setPending({ email: data.email ?? identifier, note: data.sent ? null : (data.message ?? "We couldn't send the email. Try sending it again.") });
+        setPassword("");
+        setBusy(false);
+        return;
       }
 
       router.replace(next as never);
@@ -106,6 +106,50 @@ export function SignInForm({
       setError(err instanceof Error ? err.message : "Authentication failed.");
       setBusy(false);
     }
+  }
+
+  async function resend(email: string) {
+    setBusy(true);
+    const res = await fetch("/api/auth/credentials", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "resend", email }) });
+    const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    setPending({ email, note: data.error ?? data.message ?? null });
+    setBusy(false);
+  }
+
+  if (pending && !error) {
+    return (
+      <div className="space-y-4 rounded-2xl border bg-surface p-5">
+        <div className="grid size-10 place-items-center rounded-full bg-accent-soft text-accent" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="m3 7 9 6 9-6" />
+          </svg>
+        </div>
+        <div className="space-y-1">
+          <h2 className="font-medium">Check your inbox</h2>
+          <p className="text-sm text-ink-muted">
+            We sent a link to <span className="text-ink">{pending.email}</span>. Open it to confirm your email and you'll be signed in.
+          </p>
+        </div>
+        {pending.note && <p className="rounded-sw bg-surface-sunken px-3 py-2 text-sm text-ink-muted">{pending.note}</p>}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <button type="button" disabled={busy} onClick={() => void resend(pending.email)} className="text-accent underline-offset-4 hover:underline disabled:opacity-60">
+            {busy ? "Sending…" : "Send it again"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPending(null);
+              setMode("signin");
+            }}
+            className="text-ink-muted underline-offset-4 hover:text-ink hover:underline"
+          >
+            Back to sign in
+          </button>
+        </div>
+        <p className="text-xs text-ink-faint">Nothing there after a few minutes? Check your spam folder.</p>
+      </div>
+    );
   }
 
   return (
@@ -134,65 +178,22 @@ export function SignInForm({
 
       {/* Username / Password Form */}
       <form onSubmit={handleSubmit} className="space-y-3">
-        {mode === "signup" ? (
-          <>
-            <div>
-              <label className="block text-xs font-medium text-ink-muted mb-1">Username</label>
-              <Input
-                name="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. alex"
-                required
-                minLength={2}
-                maxLength={32}
-                autoComplete="username"
-                disabled={busy}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-ink-muted mb-1">Email address</label>
-              <Input
-                type="email"
-                name="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="alex@company.com"
-                required
-                autoComplete="email"
-                disabled={busy}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-ink-muted mb-1">
-                Full name <span className="text-ink-faint font-normal">(optional)</span>
-              </label>
-              <Input
-                name="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Alex Morgan"
-                autoComplete="name"
-                disabled={busy}
-              />
-            </div>
-          </>
-        ) : (
-          <div>
-            <label className="block text-xs font-medium text-ink-muted mb-1">Username or email</label>
-            <Input
-              name="identifier"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              placeholder="e.g. alex or alex@company.com"
-              required
-              autoComplete="username"
-              disabled={busy}
-            />
-          </div>
-        )}
+        <div>
+          <label htmlFor="identifier" className="mb-1 block text-xs font-medium text-ink-muted">
+            Email
+          </label>
+          <Input
+            id="identifier"
+            type={mode === "signup" ? "email" : "text"}
+            name={mode === "signup" ? "email" : "username"}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            placeholder="you@company.lk"
+            required
+            autoComplete={mode === "signup" ? "email" : "username"}
+            disabled={busy}
+          />
+        </div>
 
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -242,6 +243,19 @@ export function SignInForm({
       {error && (
         <div role="alert" className="rounded-sw bg-danger-bg px-3 py-2 text-sm text-danger-fg">
           {error}
+          {pending && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                void resend(pending.email);
+              }}
+              className="mt-1 block underline underline-offset-4 disabled:opacity-60"
+            >
+              Send the link again
+            </button>
+          )}
         </div>
       )}
 
@@ -269,11 +283,11 @@ export function SignInForm({
       </Button>
 
       {/* Quick Demo Logins Helper */}
-      {testLogin && (
+      {testAccounts.length > 0 && (
         <div className="rounded-lg bg-surface-sunken/60 p-3 text-xs space-y-1.5">
           <p className="font-medium text-ink-muted">Quick test accounts:</p>
           <div className="flex flex-wrap gap-1.5">
-            {DEMO_ACCOUNTS.map((acc) => (
+            {testAccounts.map((acc) => (
               <button
                 key={acc.label}
                 type="button"

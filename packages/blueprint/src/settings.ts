@@ -155,6 +155,32 @@ export const TaxSettings = z
   })
   .prefault({});
 
+/**
+ * Bank rules: a line on a bank statement whose description contains the
+ * text becomes an expense to that account (and supplier), so routine
+ * charges like bank fees, rent or electricity don't need typing in.
+ */
+export const BankRule = z.object({
+  id: z.string().regex(/^brl_[a-z0-9]{3,24}$/),
+  name: z.string().trim().min(1).max(60),
+  /** Matched anywhere in the statement description, ignoring case. */
+  contains: z.string().trim().min(2).max(80),
+  /** Money leaving the account, coming in, or either. */
+  direction: z.enum(["out", "in", "any"]).default("out"),
+  /** Chart of accounts record id the amount goes to. */
+  account: z.string().max(60).optional(),
+  vendor: z.string().max(60).optional(),
+  taxCode: z.string().max(60).optional(),
+  enabled: z.boolean().default(true),
+});
+export type BankRule = z.infer<typeof BankRule>;
+
+export const BankingSettings = z
+  .object({
+    rules: z.array(BankRule).max(100).default([]),
+  })
+  .prefault({});
+
 /** How external agents (MCP) and the assistant may act. Shapewise-specific. */
 export const AgentSettings = z
   .object({
@@ -176,6 +202,7 @@ export const Settings = z
     production: ProductionSettings,
     accounting: AccountingSettings,
     tax: TaxSettings,
+    banking: BankingSettings,
     agents: AgentSettings,
   })
   .prefault({});

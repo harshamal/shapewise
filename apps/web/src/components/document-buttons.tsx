@@ -2,26 +2,27 @@
 
 import { useState, useTransition } from "react";
 import { Button, cx } from "@shapewise/ui";
-import { emailDocument, shareDocument, type ShareInfo } from "@/app/w/[tenant]/document-actions";
+import { emailDocument, emailStatement, shareDocument, shareStatement, type ShareInfo } from "@/app/w/[tenant]/document-actions";
 
 /**
  * Print, download and send a document. Sharing makes a signed link (good for
  * 30 days) and offers it by WhatsApp, email or copy.
  */
-export function DocumentButtons({ tenant, target, id, label }: { tenant: string; target: string; id: string; label: string }) {
+export function DocumentButtons({ tenant, target, id, label, statement }: { tenant: string; target: string; id: string; label: string; /** A customer statement for these dates instead of a record. */ statement?: { from: string; to: string } }) {
   const [busy, start] = useTransition();
   const [share, setShare] = useState<ShareInfo | null>(null);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [to, setTo] = useState("");
   const [sent, setSent] = useState<{ ok: boolean; message: string } | null>(null);
-  const pdf = `/api/w/${tenant}/documents/${target}/${id}`;
+  const pdf = statement ? `/api/w/${tenant}/statements/${id}?from=${statement.from}&to=${statement.to}` : `/api/w/${tenant}/documents/${target}/${id}`;
+  const join = pdf.includes("?") ? "&" : "?";
 
   const openShare = () => {
     setOpen((o) => !o);
     if (share) return;
     start(async () => {
-      const r = await shareDocument(tenant, target, id);
+      const r = statement ? await shareStatement(tenant, id, statement.from, statement.to) : await shareDocument(tenant, target, id);
       setShare(r);
       if (r.email) setTo(r.email);
     });
@@ -41,7 +42,7 @@ export function DocumentButtons({ tenant, target, id, label }: { tenant: string;
         window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(share.subject ?? label)}&body=${encodeURIComponent(share.text)}`;
         return;
       }
-      setSent(await emailDocument(tenant, target, id, { to, message: share.text }));
+      setSent(statement ? await emailStatement(tenant, id, statement, { to, message: share.text }) : await emailDocument(tenant, target, id, { to, message: share.text }));
     });
 
   return (
@@ -51,7 +52,7 @@ export function DocumentButtons({ tenant, target, id, label }: { tenant: string;
           <PrintIcon />
           Print
         </a>
-        <a href={`${pdf}?download=1`} className="inline-flex h-9 items-center rounded-sw border border-border-strong px-3 text-sm transition-colors hover:bg-surface-sunken">
+        <a href={`${pdf}${join}download=1`} className="inline-flex h-9 items-center rounded-sw border border-border-strong px-3 text-sm transition-colors hover:bg-surface-sunken">
           Download PDF
         </a>
         <Button variant="secondary" onClick={openShare} aria-expanded={open}>

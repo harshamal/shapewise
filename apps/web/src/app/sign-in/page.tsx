@@ -3,13 +3,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { safeNext } from "@/lib/auth/policy";
-import { testLoginEnabled } from "@/lib/auth/test-accounts";
+import { quickTestAccounts } from "@/lib/auth/test-accounts";
 import { Logo } from "@/components/logo";
 import { SignInForm } from "./sign-in-form";
 
 export const metadata: Metadata = {
-  title: "Sign in or Create Account · Shapewise",
-  description: "Sign in or sign up to Shapewise with username, password, or Google.",
+  title: "Sign in",
+  description: "Sign in or create a Shapewise account with your email or Google.",
 };
 
 export default async function SignIn({
@@ -18,7 +18,8 @@ export default async function SignIn({
   searchParams: Promise<{ next?: string; reason?: string; mode?: string }>;
 }) {
   const { next, reason, mode } = await searchParams;
-  const target = safeNext(next, "/start");
+  // Returning people land on their workspaces; that page sends anyone without one to setup.
+  const target = safeNext(next, "/workspaces");
   if (await getSession()) redirect(target as never);
 
   const initialMode = mode === "signup" ? "signup" : "signin";
@@ -35,13 +36,19 @@ export default async function SignIn({
           {initialMode === "signup" ? "Create your account" : "Sign in to Shapewise"}
         </h1>
         <p className="mt-1 text-sm text-ink-muted">
-          {reason === "not_member"
+          {reason === "link_expired"
+            ? "That confirmation link has expired or was replaced by a newer one. Sign in to get a new link, or sign up again."
+            : reason === "already_confirmed"
+              ? "Your email is already confirmed. Sign in with your email and password."
+              : reason === "not_member"
             ? "Your account isn't a member of that workspace. Sign in with another account, or ask its owner to invite you."
-            : "Use your username, email, or Google account to open your workspace."}
+            : initialMode === "signup"
+              ? "Just your email and a password to get started."
+              : "Use your email or Google account to open your workspace."}
         </p>
       </div>
 
-      <SignInForm next={target} initialMode={initialMode} testLogin={testLoginEnabled()} />
+      <SignInForm next={target} initialMode={initialMode} testAccounts={quickTestAccounts()} />
 
       <p className="text-center text-xs text-ink-muted">
         Just exploring?{" "}

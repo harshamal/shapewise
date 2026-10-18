@@ -71,7 +71,8 @@ export const loadWorkspace = cache(async (tenant: string) => {
     const loaded = await loadBlueprint(db, tenant).catch(() => null);
     if (!loaded) notFound();
     role = await memberRole(db, tenant, session.uid);
-    if (!role) redirect(`/sign-in?next=${next}&reason=not_member` as never);
+    // Signed in but not on this team: back to their own workspaces with a note, never to sign in again (that loops).
+    if (!role) redirect(`/workspaces?missing=${encodeURIComponent(tenant)}` as never);
     bp = loaded.bp;
     store = firestoreStore();
   }

@@ -89,7 +89,7 @@ export interface InterviewPrompt {
   preselected?: string[];
 }
 
-const SYSTEM = `You set up business software for small and medium businesses by interviewing the owner. They can be in any country; many are in Sri Lanka.
+const SYSTEM = `You set up business software for small and medium businesses by interviewing the owner. They can be in any country.
 You are a sharp, experienced operations consultant: calm, precise, warm, never chatty. No jargon (never say module, entity, schema, blueprint, field).
 
 Style: plain sentences. Never use dashes as punctuation (no em dash, no en dash, no spaced hyphen); use a comma, a full stop or "and" instead.
@@ -233,7 +233,7 @@ export function factPrompt(fact: Fact, p: BusinessProfile, note = ""): Interview
         ...base,
         topicLabel: "Where you are",
         question: "Which country do you operate in?",
-        input: { kind: "single", options: MAIN_COUNTRIES.map((c) => COUNTRY_BY_CODE.get(c)!.name), placeholder: "e.g. Sri Lanka" },
+        input: { kind: "single", options: MAIN_COUNTRIES.map((c) => COUNTRY_BY_CODE.get(c)!.name), placeholder: "e.g. Singapore" },
       };
     case "teamSize":
       return {
@@ -503,7 +503,7 @@ export const OPENING_PROMPT: InterviewPrompt = {
   topic: "business",
   section: "basics",
   topicLabel: "Your business",
-  input: { kind: "text", options: [], placeholder: "e.g. Lanka Bakes. We make cakes and short eats for cafés around Colombo" },
+  input: { kind: "text", options: [], placeholder: "e.g. Harbour Bakes. We make bread and cakes for cafés around town" },
 };
 
 export const OPENING = "Tell me about your business: what it's called, what you make or sell, and who buys from you.";

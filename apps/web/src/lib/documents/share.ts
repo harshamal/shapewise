@@ -48,3 +48,29 @@ export function readShareToken(token: string, now = Date.now()): ShareClaim | nu
     return null;
   }
 }
+
+/**
+ * A signed, expiring token for other one-off links (confirming an email):
+ * the purpose is part of the signature, so a token made for one use can't
+ * be replayed for another.
+ */
+export function signedToken(purpose: string, parts: string[], hours: number, now = Date.now()): string {
+  const body = Buffer.from(JSON.stringify([...parts, Math.floor(now / 1000) + hours * 3600])).toString("base64url");
+  return `${body}.${sign(`${purpose}:${body}`)}`;
+}
+
+export function readSignedToken(purpose: string, token: string, now = Date.now()): string[] | null {
+  const [body, sig] = token.split(".");
+  if (!body || !sig || body.length > 600) return null;
+  const want = Buffer.from(sign(`${purpose}:${body}`));
+  const got = Buffer.from(sig);
+  if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
+  try {
+    const arr = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown[];
+    const exp = arr.pop();
+    if (typeof exp !== "number" || exp * 1000 < now || !arr.every((x) => typeof x === "string")) return null;
+    return arr as string[];
+  } catch {
+    return null;
+  }
+}

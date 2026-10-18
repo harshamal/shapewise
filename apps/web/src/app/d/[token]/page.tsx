@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { documentFor } from "@/lib/documents/load";
-import { sharedRecord } from "@/lib/documents/shared";
+import { sharedDocument } from "@/lib/documents/shared";
 
 export const metadata: Metadata = { title: "Document", robots: { index: false, follow: false } };
 
@@ -10,8 +9,8 @@ export const metadata: Metadata = { title: "Document", robots: { index: false, f
  */
 export default async function SharedDocument({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const found = await sharedRecord(token);
-  if (!found) {
+  const doc = await sharedDocument(token);
+  if (!doc) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-2 px-6 text-center">
         <h1 className="text-lg font-medium">This link has expired</h1>
@@ -19,7 +18,6 @@ export default async function SharedDocument({ params }: { params: Promise<{ tok
       </main>
     );
   }
-  const doc = await documentFor(found.src, found.t, found.rec);
   const pdf = `/d/${token}/pdf`;
 
   return (

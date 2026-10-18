@@ -1,4 +1,11 @@
 {
+  "hosting": {
+    "target": "web",
+    "source": "apps/web",
+    "frameworksBackend": {
+      "region": "asia-southeast1"
+    }
+  },
   "firestore": {
     "database": "(default)",
     "location": "asia-south1",

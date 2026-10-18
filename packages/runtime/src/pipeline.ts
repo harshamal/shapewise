@@ -146,9 +146,26 @@ export function deletable(t: CTarget, rec: Pick<StoredRecord, "status">): boolea
   return t.initial !== "draft" || rec.status === "draft";
 }
 
+/** The business date a record is booked on, if it has one. */
+function bookedOn(rec: { data: Record<string, unknown> }): string | undefined {
+  const d = rec.data.date ?? (typeof rec.data.at === "string" ? rec.data.at.slice(0, 10) : undefined);
+  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : undefined;
+}
+
+/** Closed books: nothing dated on or before the lock date is created, changed, posted, voided or deleted. */
+function notClosed(run: Run, t: CTarget, verb: string, ...recs: ({ data: Record<string, unknown> } | undefined)[]) {
+  const lock = run.c.bp.settings.general.lockDate;
+  if (!lock) return;
+  for (const r of recs) {
+    const d = r && bookedOn(r);
+    if (d && d <= lock) throw new Fail("engine_rule", `The books are closed up to ${lock}, so a ${t.label.toLowerCase()} dated ${d} can't be ${verb}. Date it after ${lock}, or ask an owner to reopen the books.`);
+  }
+}
+
 async function create(run: Run, t: CTarget, input: Record<string, unknown>): Promise<CommandResult> {
   allow(run, t, "create");
   const { data, issues } = coerceRecord(t, input, "create");
+  notClosed(run, t, "created", { data });
   const links = await checkRefs(t, data, run.tx, issues);
   if (issues.length) throw new Fail("validation", `Please fix ${issues.length === 1 ? "this" : `these ${issues.length}`} before saving.`, issues);
 
@@ -188,6 +205,7 @@ async function update(run: Run, t: CTarget, id: string, patch: Record<string, un
 
   const { data, issues } = coerceRecord(t, patch, "update");
   const next: StoredRecord = { ...rec, data: { ...rec.data, ...data } };
+  notClosed(run, t, "changed", rec, next);
   next.links = await checkRefs(t, next.data, run.tx, issues);
   if (issues.length) throw new Fail("validation", `Please fix ${issues.length === 1 ? "this" : `these ${issues.length}`} before saving.`, issues);
 
@@ -218,6 +236,7 @@ async function remove(run: Run, t: CTarget, id: string): Promise<CommandResult> 
     const where = other ? `${other.label.toLowerCase()} ${titleOf(other, using)}` : "another record";
     throw new Fail("engine_rule", `${titleOf(t, rec)} is used on ${where}, so it can't be deleted.${t.actions.some((a) => a.key === "archive") ? " Archive it instead." : ""}`);
   }
+  notClosed(run, t, "deleted", rec);
   const parked = await maybePark(run, t, "delete", rec, rec);
   if (parked) return parked;
   run.tx.remove(t.target, id);
@@ -246,6 +265,8 @@ async function action(run: Run, t: CTarget, id: string, key: string, input: Reco
   if (missing.length) throw new Fail("validation", `Fill in ${missing.map((f) => t.fields.find((x) => x.key === f)?.label ?? f).join(", ")} first.`);
   if (a.when && (await evalOn(run, t, next, a.when)) !== true) throw new Fail("rule_rejected", `"${a.label}" isn't allowed for this record right now.`);
   engineChecks(t, a, next);
+  // Anything that books or reverses an entry counts; moving a draft along doesn't.
+  if (a.effects.some((e) => e === "ledger" || e === "stock") || /^(void|cancel|reverse|refund)$/.test(a.key)) notClosed(run, t, a.label.toLowerCase().startsWith("void") ? "voided" : "posted", next);
 
   await runRules(run, t, a.key, next);
   const parked = await maybePark(run, t, a.key, next, rec, a);

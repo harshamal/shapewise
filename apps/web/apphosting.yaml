@@ -1,0 +1,10 @@
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  concurrency: 80
+  minInstances: 0
+  maxInstances: 5
+
+env:
+  - variable: SW_AI_PROVIDER
+    value: gemini

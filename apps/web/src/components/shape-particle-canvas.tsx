@@ -188,7 +188,7 @@ export function ShapeParticleCanvas({ className = "", caption = true }: { classN
       ctx.clearRect(0, 0, w, h);
       for (const d of dots) {
         const glow = 0.55 + 0.45 * Math.sin(t * 1.7 + d.phase);
-        ctx.globalAlpha = d.accent ? 0.9 : 0.32 + 0.22 * glow;
+        ctx.globalAlpha = d.accent ? 0.95 : 0.45 + 0.25 * glow;
         ctx.fillStyle = d.accent ? col.accent : col.ink;
         ctx.fillRect(d.x - d.size / 2, d.y - d.size / 2, d.size, d.size);
       }

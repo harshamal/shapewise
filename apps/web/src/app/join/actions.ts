@@ -4,11 +4,14 @@ import { TeamError, acceptInvite } from "@shapewise/db";
 import { adminAuth, adminDb } from "@/lib/auth/admin";
 import { withMembership } from "@/lib/auth/policy";
 import { getSession } from "@/lib/auth/session";
+import { confirmFirst, emailConfirmed } from "@/lib/auth/confirm";
 
 /** Accepts an invitation as the signed-in person and returns where to go. */
 export async function acceptJoin(tenant: string, token: string): Promise<{ ok: boolean; message?: string; href?: string }> {
   const session = await getSession();
   if (!session) return { ok: false, message: "Please sign in first." };
+  // The invite is for an email address, so the person must show they own it.
+  if (!(await emailConfirmed(session))) return { ok: false, message: confirmFirst(session.email) };
   try {
     const db = adminDb();
     const name = String((await db.doc(`tenants/${tenant}`).get()).data()?.name ?? tenant);

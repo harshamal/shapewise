@@ -56,7 +56,8 @@ export function buildDocument({ bp, t, rec, refs, party }: DocumentInput): Docum
   const value = (f: CField, v: unknown) => formatValue(f, v, ctx);
 
   const b = bp.business;
-  const layout: Layout = template?.layout ?? "standard";
+  // Till receipts print narrow; invoices follow the country's tax invoice format when it has one.
+  const layout: Layout = template?.layout ?? (t.target === "pos_sale" ? "compact" : t.target === "invoice" && bp.settings.tax.invoiceFormat === "lk_ird" ? "ird_tax_invoice" : "standard");
   const taxIds = [b.tin && `TIN ${b.tin}`, b.vatNo && `VAT ${b.vatNo}`, b.brNo && `BR ${b.brNo}`].filter(Boolean).join("   ");
   const business = {
     name: b.name,

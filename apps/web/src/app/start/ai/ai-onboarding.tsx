@@ -14,6 +14,7 @@ import { FlowMap, ModuleCards, ReportPicker } from "./setup-review";
 import { RoleMatrix } from "@/components/role-matrix";
 import { approvalOps } from "@/lib/approval-ops";
 import { permissionModel } from "@/lib/permissions";
+import { WorkspaceCreatingOverlay } from "@/components/workspace-creating-overlay";
 
 type Turn = { role: "user"; text: string; attachments?: Attachment[] } | { role: "assistant"; prompt: InterviewPrompt };
 type Stage = "chat" | "building" | "review";
@@ -43,9 +44,9 @@ interface BuildProgress {
 const STORE_KEY = "sw-onboarding-v2";
 
 const STARTERS = [
-  "Lanka Bakes. We bake cakes and short eats for cafés around Colombo and sell at our own counter.",
-  "Ceylon Moulds. We make plastic food containers on injection moulding machines for food companies.",
-  "Kandy Hardware. We import tools and paint and distribute to hardware shops on credit.",
+  "Harbour Bakes. We bake bread, cakes and pastries for cafés around town and sell at our own counter.",
+  "Polar Moulds. We make plastic food containers on injection moulding machines for food companies.",
+  "Summit Hardware. We import tools and paint and distribute to hardware shops on credit.",
 ];
 
 const strip = (a: Attachment[] | undefined) => a?.map(({ dataUrl: _d, ...rest }) => rest);
@@ -216,16 +217,19 @@ export function AiOnboarding({ firstName }: { firstName?: string }) {
   if (stage === "building" && build) return <Building name={profile.businessName} progress={build} />;
   if (stage === "review" && design)
     return (
-      <Review
-        design={design}
-        onChange={(blueprint) => setDesign((d) => (d ? { ...d, blueprint } : d))}
-        address={address}
-        setAddress={setAddress}
-        onBack={() => setStage("chat")}
-        onCreate={create}
-        creating={creating}
-        error={error}
-      />
+      <>
+        {creating && <WorkspaceCreatingOverlay name={profile.businessName} address={address} />}
+        <Review
+          design={design}
+          onChange={(blueprint) => setDesign((d) => (d ? { ...d, blueprint } : d))}
+          address={address}
+          setAddress={setAddress}
+          onBack={() => setStage("chat")}
+          onCreate={create}
+          creating={creating}
+          error={error}
+        />
+      </>
     );
 
   const canBuild = !pending && Boolean(profile.businessName && profile.whatTheyDo && profile.products?.length);
@@ -710,7 +714,7 @@ function Review({
             ) : (
               <p className="mt-4 rounded-xl border border-dashed px-4 py-3 text-sm leading-relaxed text-ink-muted">
                 No approvals yet. Once you&apos;ve seen the system, set them per screen, action and amount in Governance, Approvals, or describe one in System changes
-                (for example &quot;purchase orders over Rs 500,000 need the owner&quot;) and the AI sets it up for you to confirm.
+                (for example &quot;purchase orders over 5,000 need the owner&quot;) and the AI sets it up for you to confirm.
               </p>
             )}
             {s.rules.length > 0 && (
@@ -798,7 +802,7 @@ function Review({
 }
 
 function DerivedFooter() {
-  return <p className="px-1 text-[11px] leading-relaxed text-ink-faint">Tax rules are built in for Sri Lanka as of 2026. Thresholds and rates change with each budget, so confirm with your accountant.</p>;
+  return <p className="px-1 text-[11px] leading-relaxed text-ink-faint">Tax rules are built in for each supported country as of 2026. Rates and thresholds change, so confirm with your accountant.</p>;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

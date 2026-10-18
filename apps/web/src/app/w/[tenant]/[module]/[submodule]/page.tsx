@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { titleOf, type CField, type CTarget } from "@shapewise/runtime";
 import { REPORT_CATEGORIES, REPORT_CATEGORY_LABEL, type ReportKey } from "@shapewise/blueprint";
-import { PERIOD_LABEL, hasPeriod, type PeriodKey } from "@shapewise/runtime/reports";
+import { PERIOD_LABEL, RECORD_REPORTS, hasPeriod, type PeriodKey } from "@shapewise/runtime/reports";
 import { StatusPill, type Tone } from "@shapewise/ui";
 import { ApprovalsInbox } from "@/components/approvals-inbox";
 import { ReportCard, ReportView } from "@/components/report-view";
@@ -11,6 +11,8 @@ import { formatValue, isNumeric } from "@/lib/format";
 import { canCreate, listRecords, refTitles, targetFor } from "@/lib/records";
 import { ANALYTICS_MODULE, asPeriod, reportsHref, runFor, visibleReports } from "@/lib/reports";
 import { ChangeStudio } from "@/components/change-studio";
+import { PosTerminal } from "@/components/pos-terminal";
+import { Screen, hasScreen } from "@/components/screens";
 import { loadWorkspace, shellProps, type Workspace } from "@/lib/workspace";
 
 const MAX_COLUMNS = 6;
@@ -20,10 +22,11 @@ export default async function SubmodulePage({
   searchParams,
 }: {
   params: Promise<{ tenant: string; module: string; submodule: string }>;
-  searchParams: Promise<{ r?: string; p?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { tenant, module, submodule } = await params;
-  const query = await searchParams;
+  const raw = await searchParams;
+  const query = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])) as Record<string, string | undefined>;
   const ws = await loadWorkspace(tenant);
   // Settings live in the popup; old links open it on the right section.
   if (module === "settings") redirect(`${ws.base}?settings=${encodeURIComponent(submodule)}` as never);
@@ -49,6 +52,10 @@ export default async function SubmodulePage({
         <RecordList ws={ws} t={t} here={here} />
       ) : submodule === "approvals" ? (
         <ApprovalsInbox ws={ws} />
+      ) : hasScreen(submodule) ? (
+        <Screen submodule={submodule} ws={ws} q={query} here={here} />
+      ) : submodule === "pos_terminal" ? (
+        <PosTerminal tenant={tenant} />
       ) : submodule === "change_studio" ? (
         <ChangeStudio tenant={tenant} />
       ) : submodule === "audit_log" ? (
@@ -93,7 +100,7 @@ async function ReportsScreen({ ws, here, only, pick, period }: { ws: Workspace; 
                     className={`flex items-center justify-between gap-2 rounded-sw px-2 py-1.5 ${r.def.key === chosen.def.key ? "bg-accent-soft text-ink" : "text-ink-muted hover:bg-surface-sunken hover:text-ink"}`}
                   >
                     <span className="truncate">{r.def.label}</span>
-                    {r.def.source !== "records" && <span className="shrink-0 text-xs text-ink-faint">Soon</span>}
+                    {!RECORD_REPORTS[r.def.key as ReportKey] && <span className="shrink-0 text-xs text-ink-faint">Soon</span>}
                   </Link>
                 </li>
               ))}

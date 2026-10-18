@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { suggestWorkspaceId, workspaceIdProblem } from "@shapewise/db/workspace-id";
 import { Button, Input, cx } from "@shapewise/ui";
 import { createWorkspace, type CreateResult } from "../actions";
+import { WorkspaceCreatingOverlay } from "@/components/workspace-creating-overlay";
 
 export interface PresetOption {
   key: string;
@@ -39,7 +40,9 @@ export function StartForm({ presets }: { presets: PresetOption[] }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-8" noValidate>
+    <>
+      {pending && <WorkspaceCreatingOverlay name={name} address={address} />}
+      <form onSubmit={submit} className="space-y-8" noValidate>
       {result && !result.ok && !result.field && (
         <p role="alert" className="rounded-sw bg-danger-bg px-4 py-3 text-sm text-danger-fg">
           {result.message}
@@ -102,5 +105,6 @@ export function StartForm({ presets }: { presets: PresetOption[] }) {
         <span className="text-sm text-ink-muted">You can change everything later in Settings.</span>
       </div>
     </form>
+    </>
   );
 }

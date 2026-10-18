@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "Create your account · Shapewise",
+  title: "Create your account",
 };
 
 export default async function SignUp({

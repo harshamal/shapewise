@@ -40,7 +40,7 @@ export function today(ws: Workspace) {
 export async function ledgerSnapshot(ws: Workspace, extra: string[] = []): Promise<Snapshot> {
   const first = await loadSnapshot(ws.store, ws.tenant, ws.compiled, [JOURNAL]);
   const sources = new Set(first.list(JOURNAL).map((e) => String(e.data.source_target)));
-  return loadSnapshot(ws.store, ws.tenant, ws.compiled, [JOURNAL, "account", ...sources, ...extra]);
+  return loadSnapshot(ws.store, ws.tenant, ws.compiled, [JOURNAL, "account", "customer", "vendor", ...sources, ...extra]);
 }
 
 export type { StoredLine };

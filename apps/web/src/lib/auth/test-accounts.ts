@@ -95,7 +95,7 @@ export async function signInTest(emailIn: string, password: string): Promise<str
 export async function idTokenFor(uid: string): Promise<string> {
   const custom = await adminAuth().createCustomToken(uid, { test: true });
   const key = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  if (!key) throw new TestAuthError("Firebase isn't configured.", 503);
+  if (!key) throw new TestAuthError("Sign-in is not available right now.", 503);
   const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -107,4 +107,19 @@ export async function idTokenFor(uid: string): Promise<string> {
     throw new TestAuthError("Sign-in is not available right now.", 503);
   }
   return body.idToken;
+}
+
+/**
+ * The quick-fill test accounts for the sign-in page, read from .env.local
+ * (TEST_ACCOUNT_*, TEST_SALES_*, TEST_STORES_*). Only when test login is on,
+ * so their passwords never reach a normal visitor's browser.
+ */
+export function quickTestAccounts(): { label: string; identifier: string; password: string }[] {
+  if (!testLoginEnabled()) return [];
+  const pick = (label: string, prefix: string) => {
+    const identifier = process.env[`${prefix}_EMAIL`];
+    const password = process.env[`${prefix}_PASSWORD`];
+    return identifier && password ? [{ label, identifier, password }] : [];
+  };
+  return [...pick("Owner", "TEST_ACCOUNT"), ...pick("Sales", "TEST_SALES"), ...pick("Stores", "TEST_STORES")];
 }

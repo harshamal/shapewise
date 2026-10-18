@@ -62,7 +62,8 @@ const sha = (str: string) => createHash("sha256").update(str).digest("hex");
 const docId = (str: string) => sha(str).slice(0, 40);
 
 export interface SignUpParams {
-  username: string;
+  /** Optional: made from the email when left out, so signing up needs only an email and password. */
+  username?: string;
   email: string;
   password: string;
   name?: string;
@@ -77,7 +78,7 @@ export interface SignInParams {
 export async function idTokenFor(uid: string): Promise<string> {
   const custom = await adminAuth().createCustomToken(uid);
   const key = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  if (!key) throw new AuthError("Firebase is not configured on this server.", 503);
+  if (!key) throw new AuthError("Sign-in is not available right now. Please try again shortly.", 503);
 
   const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${encodeURIComponent(key)}`, {
     method: "POST",
@@ -93,18 +94,29 @@ export async function idTokenFor(uid: string): Promise<string> {
   return body.idToken;
 }
 
-/**
- * Register a new user with username, email, and password.
- */
-export async function signUpCredentials({ username, email, password, name }: SignUpParams): Promise<{ uid: string; idToken: string }> {
-  const cleanUsername = normaliseUsername(username);
-  const cleanEmail = normaliseEmail(email);
-  const displayName = (name && name.trim().length > 0) ? name.trim() : username.trim();
+/** A readable name from an email until the person sets one: "kamal.perera@x.lk" becomes "Kamal Perera". */
+function nameFromEmail(email: string): string {
+  const local = email.split("@")[0] ?? email;
+  return local.split(/[._-]+/).filter(Boolean).map((w) => w[0]!.toUpperCase() + w.slice(1)).join(" ") || local;
+}
 
-  // Validate username
-  if (!/^[a-zA-Z0-9._-]{2,32}$/.test(cleanUsername)) {
-    throw new AuthError("Username must be between 2 and 32 characters and only contain letters, numbers, dots, hyphens, or underscores.");
+/** An unused username made from the email, with a few digits added if it's taken. */
+async function freeUsername(email: string): Promise<string> {
+  const base = (normaliseUsername(email.split("@")[0] ?? "").replace(/[^a-z0-9._-]/g, "").slice(0, 24) || "user").padEnd(2, "0");
+  const db = adminDb();
+  for (let i = 0; i < 6; i++) {
+    const candidate = i === 0 ? base : `${base}${Math.floor(100 + Math.random() * 9900)}`;
+    if (!(await db.collection("credentialIndex").doc(`user_${candidate}`).get()).exists) return candidate;
   }
+  return `${base}${Date.now().toString(36).slice(-6)}`;
+}
+
+/**
+ * Register a new user with an email and password (a username is optional).
+ */
+export async function signUpCredentials({ username, email, password, name }: SignUpParams): Promise<{ uid: string; stamp: string }> {
+  const cleanEmail = normaliseEmail(email);
+  const displayName = name?.trim() || nameFromEmail(cleanEmail);
 
   // Validate email
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
@@ -117,25 +129,34 @@ export async function signUpCredentials({ username, email, password, name }: Sig
   }
 
   const db = adminDb();
-
-  // Check username uniqueness
-  const userIndexRef = db.collection("credentialIndex").doc(`user_${cleanUsername}`);
-  const userIndexSnap = await userIndexRef.get();
-  if (userIndexSnap.exists) {
-    throw new AuthError(`The username "${cleanUsername}" is already taken. Please choose another.`);
-  }
-
-  // Check email uniqueness in credential index
   const emailIndexRef = db.collection("credentialIndex").doc(`email_${docId(cleanEmail)}`);
-  const emailIndexSnap = await emailIndexRef.get();
-  if (emailIndexSnap.exists) {
-    throw new AuthError("An account with this email already exists. Please sign in instead.");
-  }
-
-  // Check legacy test accounts
-  const legacyTestSnap = await db.collection("testAccounts").doc(docId(cleanEmail)).get();
+  // The email checks run together (each is a round trip); the username is only worked out for a new account.
+  const [emailIndexSnap, legacyTestSnap] = await Promise.all([emailIndexRef.get(), db.collection("testAccounts").doc(docId(cleanEmail)).get()]);
   if (legacyTestSnap.exists) {
     throw new AuthError("An account with this email already exists. Please sign in instead.");
+  }
+  if (emailIndexSnap.exists) {
+    const existing = String(emailIndexSnap.data()?.uid ?? "");
+    const confirmed = await adminAuth()
+      .getUser(existing)
+      .then((u) => u.emailVerified)
+      .catch(() => true);
+    if (confirmed) throw new AuthError("An account with this email already exists. Please sign in instead.");
+    // Never confirmed, so nobody has shown they own the address: the new password replaces the pending one,
+    // and the new stamp makes links sent for the old password stop working.
+    const stamp = randomBytes(9).toString("base64url");
+    await db.collection("credentials").doc(existing).update({ password: await hashPassword(password), confirmStamp: stamp, updatedAt: new Date().toISOString() });
+    return { uid: existing, stamp };
+  }
+
+  // A username they chose is checked; one made from the email is already known to be free.
+  const cleanUsername = username?.trim() ? normaliseUsername(username) : await freeUsername(cleanEmail);
+  if (!/^[a-zA-Z0-9._-]{2,32}$/.test(cleanUsername)) {
+    throw new AuthError("Username must be between 2 and 32 characters and only contain letters, numbers, dots, hyphens, or underscores.");
+  }
+  const userIndexRef = db.collection("credentialIndex").doc(`user_${cleanUsername}`);
+  if (username?.trim() && (await userIndexRef.get()).exists) {
+    throw new AuthError(`The username "${cleanUsername}" is already taken. Please choose another.`);
   }
 
   const uid = `usr_${sha(`uid:${cleanEmail}`).slice(0, 24)}`;
@@ -146,7 +167,7 @@ export async function signUpCredentials({ username, email, password, name }: Sig
   } catch (e) {
     const code = (e as { code?: string }).code;
     if (code === "auth/email-already-exists") {
-      throw new AuthError("An account with this email already exists in Firebase. Please sign in instead.");
+      throw new AuthError("This email already has an account through Google. Use Continue with Google to sign in.");
     }
     if (code !== "auth/uid-already-exists") {
       console.error("signUpCredentials: createUser error", e);
@@ -156,6 +177,8 @@ export async function signUpCredentials({ username, email, password, name }: Sig
 
   const passwordHash = await hashPassword(password);
   const now = new Date().toISOString();
+  // Ties confirmation links to this password: changing it (signing up again) makes old links stop working.
+  const stamp = randomBytes(9).toString("base64url");
 
   // Write credential and index documents atomically in a batch
   const batch = db.batch();
@@ -166,57 +189,52 @@ export async function signUpCredentials({ username, email, password, name }: Sig
     email: cleanEmail,
     name: displayName,
     password: passwordHash,
+    confirmStamp: stamp,
     createdAt: now,
   });
   batch.set(userIndexRef, { uid, username: cleanUsername, email: cleanEmail });
   batch.set(emailIndexRef, { uid, username: cleanUsername, email: cleanEmail });
   await batch.commit();
-
-  const idToken = await idTokenFor(uid);
-  return { uid, idToken };
+  return { uid, stamp };
 }
 
 /**
  * Sign in with either a username or an email address, plus password.
  */
-export async function signInCredentials({ identifier, password }: SignInParams): Promise<{ uid: string; idToken: string }> {
+export async function signInCredentials({ identifier, password }: SignInParams): Promise<{ uid: string; idToken: string; confirmed: boolean }> {
   const cleanId = identifier.trim().toLowerCase();
   guardThrottle(cleanId);
 
   const db = adminDb();
   let uid: string | null = null;
   let storedPasswordHash: string | null = null;
+  let confirmedFlag = false;
 
-  // 1. Try resolving identifier as username or email from credentialIndex
-  if (cleanId.includes("@")) {
-    const emailIndexSnap = await db.collection("credentialIndex").doc(`email_${docId(cleanId)}`).get();
-    if (emailIndexSnap.exists) {
-      uid = emailIndexSnap.data()?.uid ?? null;
-    }
-  } else {
-    const userIndexSnap = await db.collection("credentialIndex").doc(`user_${cleanId}`).get();
-    if (userIndexSnap.exists) {
-      uid = userIndexSnap.data()?.uid ?? null;
-    }
-  }
+  // Every lookup that doesn't depend on another runs at once: each one is a round trip to the database.
+  // An email's account id is derived from the email, so its password record can be read alongside the index.
+  const guess = cleanId.includes("@") ? `usr_${sha(`uid:${cleanId}`).slice(0, 24)}` : null;
+  const [indexSnap, testSnap, guessSnap] = await Promise.all([
+    db.collection("credentialIndex").doc(cleanId.includes("@") ? `email_${docId(cleanId)}` : `user_${cleanId}`).get(),
+    db.collection("testAccounts").doc(docId(cleanId)).get(),
+    guess ? db.collection("credentials").doc(guess).get() : Promise.resolve(null),
+  ]);
+  uid = (indexSnap.exists && indexSnap.data()?.uid) || null;
 
-  // 2. If found in credentials collection
   if (uid) {
-    const credSnap = await db.collection("credentials").doc(uid).get();
+    const credSnap = guessSnap && uid === guess ? guessSnap : await db.collection("credentials").doc(uid).get();
     if (credSnap.exists) {
       storedPasswordHash = credSnap.data()?.password ?? null;
+      confirmedFlag = credSnap.data()?.confirmed === true;
     }
   }
 
-  // 3. Fallback: Check legacy test accounts (if cleanId is an email or matches a known test account)
+  // Legacy test accounts, by exact email, or (only while test login is on) by a short name like "claude".
   if (!storedPasswordHash) {
-    // Try exact email doc
-    const testSnap = await db.collection("testAccounts").doc(docId(cleanId)).get();
     if (testSnap.exists) {
       const data = testSnap.data() as { uid: string; password: string };
       uid = data.uid;
       storedPasswordHash = data.password;
-    } else {
+    } else if (process.env.SW_TEST_LOGIN === "1") {
       // Check if identifier matches test accounts by username prefix (e.g. "claude", "sales", "sandy")
       const allTest = await db.collection("testAccounts").limit(20).get();
       for (const doc of allTest.docs) {
@@ -238,6 +256,15 @@ export async function signInCredentials({ identifier, password }: SignInParams):
   }
 
   failures.delete(cleanId);
-  const idToken = await idTokenFor(uid);
-  return { uid, idToken };
+  // Test accounts and accounts marked confirmed skip the extra check; others ask Firebase, alongside the token exchange.
+  const [idToken, confirmed] = await Promise.all([
+    idTokenFor(uid),
+    confirmedFlag || uid.startsWith("test_")
+      ? Promise.resolve(true)
+      : adminAuth()
+          .getUser(uid)
+          .then((u) => u.emailVerified)
+          .catch(() => false),
+  ]);
+  return { uid, idToken, confirmed };
 }

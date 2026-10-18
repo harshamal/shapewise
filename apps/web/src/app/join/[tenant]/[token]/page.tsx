@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { findInvite, loadBlueprint, memberRole, workspaceIdProblem } from "@shapewise/db";
 import { adminDb } from "@/lib/auth/admin";
 import { getSession } from "@/lib/auth/session";
+import { emailConfirmed } from "@/lib/auth/confirm";
+import { ConfirmEmailBanner } from "@/components/confirm-email-banner";
 import { JoinButton, SwitchAccount } from "./join-button";
 
 export const metadata: Metadata = { title: "Join a workspace" };
@@ -20,6 +22,7 @@ export default async function Join({ params }: { params: Promise<{ tenant: strin
   if (!invite || !loaded) return <Shell title="This invitation can't be used" body="It may have expired, been used already, or been withdrawn. Ask whoever invited you for a new link." />;
   const role = loaded.bp.roles.find((r) => r.key === invite.roleKey);
   const mismatch = (session.email ?? "").toLowerCase() !== invite.email;
+  const confirmed = await emailConfirmed(session);
 
   return (
     <Shell
@@ -33,6 +36,8 @@ export default async function Join({ params }: { params: Promise<{ tenant: strin
           </p>
           <SwitchAccount next={`/join/${tenant}/${token}`} />
         </div>
+      ) : !confirmed ? (
+        <ConfirmEmailBanner email={session.email} />
       ) : (
         <JoinButton tenant={tenant} token={token} />
       )}

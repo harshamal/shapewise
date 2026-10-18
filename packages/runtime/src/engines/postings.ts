@@ -446,15 +446,17 @@ const HANDLERS: Record<string, Handler> = {
 
   async "pos_shift.close"(p) {
     const sales = (await p.cache.list("pos_sale")).filter((s) => s.data.shift === p.rec.id && s.status === "completed");
-    if (!sales.length) return;
-    const cash = await p.books.defaultBank("cash");
-    let total = 0;
+    // Card and QR takings go to the bank; only cash sales end up in the drawer.
+    const byCard = (s: StoredRecord) => s.data.tender === "card" || s.data.tender === "qr";
+    let cashTotal = 0;
+    let bankTotal = 0;
     const lines: JournalLine[] = [];
     let cost = 0;
     let wh: string | undefined;
     for (const s of sales) {
       const rv = await revenue(p, s, "credit");
-      total += rv.total;
+      if (byCard(s)) bankTotal += rv.total;
+      else cashTotal += rv.total;
       lines.push(...rv.lines);
       for (const l of rows(s)) {
         const it = await p.tracked(l.item);
@@ -463,7 +465,15 @@ const HANDLERS: Record<string, Handler> = {
         cost += await p.issueGoods(it, wh, num(l.quantity), { lot: l.lot });
       }
     }
-    lines.unshift({ role: "cash", debit: total, bank_account: cash?.data.kind === "cash" ? cash.id : undefined });
+    // Over or short: what was counted against the float plus cash taken.
+    if (typeof p.rec.data.counted_cash === "number") p.rec.data.variance = p.rec.data.counted_cash - num(p.rec.data.opening_float) - cashTotal;
+    if (!sales.length) return;
+    const cash = await p.books.defaultBank("cash");
+    const bank = await p.books.defaultBank("bank");
+    lines.unshift(
+      { role: "cash", debit: cashTotal, bank_account: cash?.data.kind === "cash" ? cash.id : undefined },
+      { role: "bank", debit: bankTotal, bank_account: bank?.data.kind === "bank" ? bank.id : undefined },
+    );
     if (wh) lines.push({ role: "cogs", debit: cost }, { role: await p.invRole(wh), credit: cost });
     await p.journal(lines, p.ctx.today);
   },
@@ -473,8 +483,9 @@ const HANDLERS: Record<string, Handler> = {
     const shift = await p.cache.get("pos_shift", p.rec.data.shift);
     if (shift?.status !== "closed") return;
     const rv = await revenue(p, p.rec, "debit");
-    const cash = await p.books.defaultBank("cash");
-    const lines: JournalLine[] = [...rv.lines, { role: "cash", credit: rv.total, bank_account: cash?.data.kind === "cash" ? cash.id : undefined }];
+    const card = p.rec.data.tender === "card" || p.rec.data.tender === "qr";
+    const money = await p.books.defaultBank(card ? "bank" : "cash");
+    const lines: JournalLine[] = [...rv.lines, { role: card ? "bank" : "cash", credit: rv.total, bank_account: money?.data.kind === (card ? "bank" : "cash") ? money.id : undefined }];
     const wh = await p.storeIfGoods(p.rec, "finished_goods");
     if (wh) {
       const cost = await linesBackIn(p, p.rec, wh);
