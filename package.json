@@ -14,6 +14,12 @@
     "gen:indexes": "pnpm --filter @shapewise/db gen:indexes",
     "emulators": "firebase emulators:start --project demo-shapewise"
   },
+  "pnpm": {
+    "overrides": {
+      "jwks-rsa": "3.2.2",
+      "jose": "^4.15.9"
+    }
+  },
   "devDependencies": {
     "esbuild": "^0.28.2",
     "turbo": "^2.5.8",
