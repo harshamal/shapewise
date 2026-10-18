@@ -52,7 +52,7 @@
   --sw-topbar-height: 52px;
 
   /* type: Inter first, then Sinhala and Tamil faces for local-language labels */
-  --sw-font-sans: var(--font-inter), var(--font-sinhala), var(--font-tamil), ui-sans-serif, system-ui, sans-serif;
+  --sw-font-sans: var(--font-inter), "Noto Sans Sinhala", "Noto Sans Tamil", ui-sans-serif, system-ui, sans-serif;
   --sw-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --sw-weight-regular: 400;
   --sw-weight-medium: 500;
