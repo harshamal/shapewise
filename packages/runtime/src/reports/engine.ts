@@ -117,8 +117,10 @@ export function snapshotOf(compiled: Compiled, records: Record<string, StoredRec
 export async function loadSnapshot(store: Store, tenant: string, compiled: Compiled, targets: Iterable<string>): Promise<Snapshot> {
   const wanted = [...new Set(targets)].filter((t) => compiled.targets.has(t) || (ENGINE_TARGETS as readonly string[]).includes(t));
   const records: Record<string, StoredRecord[]> = {};
+  // All record types at once: on Firestore each list is a round trip, and a report can read a dozen.
   await store.read(tenant, async (tx) => {
-    for (const t of wanted) records[t] = await tx.list(t);
+    const lists = await Promise.all(wanted.map((t) => tx.list(t)));
+    wanted.forEach((t, i) => (records[t] = lists[i]!));
   });
   return snapshotOf(compiled, records);
 }

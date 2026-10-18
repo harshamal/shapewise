@@ -1,6 +1,6 @@
 import "server-only";
-import { JOURNAL, type StoredLine } from "@shapewise/runtime";
-import { addMonths, loadSnapshot, type Snapshot } from "@shapewise/runtime/reports";
+import { JOURNAL, type StoredLine, type StoredRecord } from "@shapewise/runtime";
+import { addMonths, snapshotOf, type Snapshot } from "@shapewise/runtime/reports";
 import { businessToday } from "./records";
 import type { Workspace } from "./workspace";
 
@@ -37,10 +37,30 @@ export function today(ws: Workspace) {
 }
 
 /** The books, the chart of accounts, and every document an entry came from (for names and links). */
-export async function ledgerSnapshot(ws: Workspace, extra: string[] = []): Promise<Snapshot> {
-  const first = await loadSnapshot(ws.store, ws.tenant, ws.compiled, [JOURNAL]);
-  const sources = new Set(first.list(JOURNAL).map((e) => String(e.data.source_target)));
-  return loadSnapshot(ws.store, ws.tenant, ws.compiled, [JOURNAL, "account", "customer", "vendor", ...sources, ...extra]);
+export function ledgerSnapshot(ws: Workspace, extra: string[] = []): Promise<Snapshot> {
+  return journalSnapshot(ws, ["account", "customer", "vendor", ...extra]);
+}
+
+/**
+ * The journal plus other record types, read once each: the journal and the
+ * named types load together, then the document types the entries came from
+ * (for names and links) load together in a second round. Each list is a
+ * round trip, so nothing is read twice and nothing waits on anything it
+ * doesn't need.
+ */
+export async function journalSnapshot(src: Pick<Workspace, "store" | "tenant" | "compiled">, targets: string[]): Promise<Snapshot> {
+  const known = (t: string) => src.compiled.targets.has(t);
+  const first = [...new Set(targets.filter(known))];
+  const records: Record<string, StoredRecord[]> = {};
+  await src.store.read(src.tenant, async (tx) => {
+    const [journal, ...lists] = await Promise.all([tx.list(JOURNAL), ...first.map((t) => tx.list(t))]);
+    records[JOURNAL] = journal!;
+    first.forEach((t, i) => (records[t] = lists[i]!));
+    const sources = [...new Set(journal!.map((e) => String(e.data.source_target)))].filter((t) => known(t) && !(t in records));
+    const more = await Promise.all(sources.map((t) => tx.list(t)));
+    sources.forEach((t, i) => (records[t] = more[i]!));
+  });
+  return snapshotOf(src.compiled, records);
 }
 
 export type { StoredLine };

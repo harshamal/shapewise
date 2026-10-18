@@ -68,9 +68,10 @@ export const loadWorkspace = cache(async (tenant: string) => {
   } else {
     if (!session) redirect(`/sign-in?next=${next}` as never);
     const db = adminDb();
-    const loaded = await loadBlueprint(db, tenant).catch(() => null);
+    // Independent reads go together: each is a round trip to the database.
+    const [loaded, member] = await Promise.all([loadBlueprint(db, tenant).catch(() => null), memberRole(db, tenant, session.uid).catch(() => null)]);
     if (!loaded) notFound();
-    role = await memberRole(db, tenant, session.uid);
+    role = member;
     // Signed in but not on this team: back to their own workspaces with a note, never to sign in again (that loops).
     if (!role) redirect(`/workspaces?missing=${encodeURIComponent(tenant)}` as never);
     bp = loaded.bp;

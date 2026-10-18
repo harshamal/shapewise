@@ -16,14 +16,30 @@ export interface Session {
 }
 
 /**
+ * When each session cookie last passed the full revocation check. The
+ * signature and expiry are checked locally on every request (no network);
+ * asking Firebase whether the session was revoked is a round trip, so it
+ * runs once per cookie every few minutes instead of on every page.
+ */
+const REVOCATION_CHECK_MS = 5 * 60_000;
+const g = globalThis as typeof globalThis & { __swRevocation?: Map<string, number> };
+const lastRevocationCheck = (g.__swRevocation ??= new Map<string, number>());
+
+/**
  * The signed-in person for this request, or null. Verifies the session cookie
- * (including revocation) once per request.
+ * once per request, and its revocation every few minutes.
  */
 export const getSession = cache(async (): Promise<Session | null> => {
   const cookie = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!cookie) return null;
   try {
-    const t = await adminAuth().verifySessionCookie(cookie, true);
+    const key = cookie.slice(-32);
+    const fresh = Date.now() - (lastRevocationCheck.get(key) ?? 0) < REVOCATION_CHECK_MS;
+    const t = await adminAuth().verifySessionCookie(cookie, !fresh);
+    if (!fresh) {
+      if (lastRevocationCheck.size > 5000) lastRevocationCheck.clear();
+      lastRevocationCheck.set(key, Date.now());
+    }
     return {
       uid: t.uid,
       email: t.email,

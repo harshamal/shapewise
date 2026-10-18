@@ -1,6 +1,7 @@
 import "server-only";
 import { JOURNAL, titleOf, type StoredLine, type StoredRecord } from "@shapewise/runtime";
-import { AGE_BUCKETS, ageBucket, loadSnapshot, openDocuments, type Snapshot } from "@shapewise/runtime/reports";
+import { AGE_BUCKETS, ageBucket, openDocuments, type Snapshot } from "@shapewise/runtime/reports";
+import { journalSnapshot } from "./screens";
 import { formatMoney, formatValue } from "./format";
 import type { DocSource } from "./documents/load";
 import type { DocumentModel } from "./documents/model";
@@ -37,10 +38,8 @@ export interface Statement {
 
 const ofCustomer = (l: StoredLine, id: string) => l.party?.target === "customer" && l.party.id === id;
 
-export async function statementSnapshot(src: DocSource): Promise<Snapshot> {
-  const first = await loadSnapshot(src.store, src.tenant, src.compiled, [JOURNAL]);
-  const sources = new Set(first.list(JOURNAL).map((e) => String(e.data.source_target)));
-  return loadSnapshot(src.store, src.tenant, src.compiled, [JOURNAL, "customer", "invoice", "receipt", "credit_note", ...sources]);
+export function statementSnapshot(src: DocSource): Promise<Snapshot> {
+  return journalSnapshot(src, ["customer", "invoice", "receipt", "credit_note"]);
 }
 
 export function buildStatement(s: Snapshot, customerId: string, from: string, to: string, today: string): Statement | null {

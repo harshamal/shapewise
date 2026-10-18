@@ -48,37 +48,40 @@ function refTargets(t: CTarget): Set<string> {
 /** Picker options for every ref field on a form: target → [{ value, label }]. */
 export async function refOptions(ws: Workspace, t: CTarget) {
   const out: Record<string, { value: string; label: string }[]> = {};
-  for (const target of refTargets(t)) {
+  const targets = [...refTargets(t)];
+  // Every picker's records at once: each list is a round trip to the database.
+  const lists = await ws.store.read(ws.tenant, (tx) => Promise.all(targets.map((target) => (ws.compiled.targets.has(target) ? tx.list(target) : Promise.resolve([])))));
+  targets.forEach((target, i) => {
     const rt = ws.compiled.targets.get(target);
-    if (!rt) {
-      out[target] = [];
-      continue;
-    }
-    const rows = await ws.store.read(ws.tenant, (tx) => tx.list(target));
-    out[target] = rows
-      .filter((r) => !["archived", "void", "cancelled"].includes(r.status ?? ""))
-      .map((r) => ({ value: r.id, label: titleOf(rt, r) }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }
+    out[target] = rt
+      ? lists[i]!
+          .filter((r) => !["archived", "void", "cancelled"].includes(r.status ?? ""))
+          .map((r) => ({ value: r.id, label: titleOf(rt, r) }))
+          .sort((a, b) => a.label.localeCompare(b.label))
+      : [];
+  });
   return out;
 }
 
 /** Titles for every record referenced by these records, for display. */
 export async function refTitles(ws: Pick<Workspace, "store" | "tenant" | "compiled">, t: CTarget, recs: StoredRecord[]): Promise<RefTitles> {
+  const fields = new Set([...t.fields, ...(t.lines?.fields ?? []), ...t.children.flatMap((c) => c.fields)].filter((f) => f.type === "ref" && f.to && f.to !== "user"));
+  // Collect every distinct reference first, then fetch them all at once instead of one by one.
+  const wanted = new Map<string, string>(); // id → target
+  for (const rec of recs) {
+    const values: [CField, unknown][] = [];
+    for (const f of t.fields) values.push([f, rec.data[f.key]]);
+    for (const l of [t.lines, ...t.children]) for (const row of ((l && (rec.data[l.key] as Record<string, unknown>[])) ?? [])) for (const f of l!.fields) values.push([f, row[f.key]]);
+    for (const [f, v] of values) if (fields.has(f) && typeof v === "string" && v && !wanted.has(v)) wanted.set(v, f.to!);
+  }
   const titles: RefTitles = {};
-  const fields = [...t.fields, ...(t.lines?.fields ?? []), ...t.children.flatMap((c) => c.fields)].filter((f) => f.type === "ref" && f.to && f.to !== "user");
-  await ws.store.read(ws.tenant, async (tx) => {
-    for (const rec of recs) {
-      const values: [CField, unknown][] = [];
-      for (const f of t.fields) values.push([f, rec.data[f.key]]);
-      for (const l of [t.lines, ...t.children]) for (const row of ((l && (rec.data[l.key] as Record<string, unknown>[])) ?? [])) for (const f of l!.fields) values.push([f, row[f.key]]);
-      for (const [f, v] of values) {
-        if (!fields.includes(f) || typeof v !== "string" || titles[v]) continue;
-        const rt = ws.compiled.targets.get(f.to!);
-        const r = rt && (await tx.get(f.to!, v));
-        titles[v] = r && rt ? titleOf(rt, r) : "Deleted record";
-      }
-    }
+  if (!wanted.size) return titles;
+  const entries = [...wanted];
+  const found = await ws.store.read(ws.tenant, (tx) => Promise.all(entries.map(([id, target]) => (ws.compiled.targets.has(target) ? tx.get(target, id) : Promise.resolve(undefined)))));
+  entries.forEach(([id, target], i) => {
+    const rt = ws.compiled.targets.get(target);
+    const r = found[i];
+    titles[id] = r && rt ? titleOf(rt, r) : "Deleted record";
   });
   return titles;
 }
