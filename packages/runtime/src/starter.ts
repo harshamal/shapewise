@@ -1,4 +1,4 @@
-import { CHART_TEMPLATES, type Blueprint } from "@shapewise/blueprint";
+import { chartOf, type Blueprint } from "@shapewise/blueprint";
 import type { Command, CommandResult } from "./commands";
 import type { StoredRecord } from "./store";
 
@@ -39,7 +39,7 @@ export async function seedStarterRecords(bp: Blueprint, deps: StarterDeps): Prom
   /* chart of accounts, parents before children */
   const existing = await deps.list("account");
   const byCode = new Map(existing.map((a) => [String(a.data.code), a.id]));
-  for (const a of CHART_TEMPLATES[bp.settings.accounting.chartTemplate].accounts) {
+  for (const a of chartOf(bp)) {
     if (byCode.has(a.code)) continue;
     const id = await make("account", { code: a.code, name: a.name, type: a.type, subtype: a.subtype ?? (a.role ? a.role : undefined), parent: a.parent ? byCode.get(a.parent) : undefined }, `Account ${a.code}`);
     if (id) byCode.set(a.code, id);
@@ -69,7 +69,7 @@ export async function seedStarterRecords(bp: Blueprint, deps: StarterDeps): Prom
 
   /* tax rates */
   const rates = new Set((await deps.list("tax_code")).map((t) => String(t.data.name)));
-  for (const c of bp.seed.taxCodes) if (!rates.has(c.name)) await make("tax_code", { name: c.name, rate: c.rate, kind: c.kind }, c.name);
+  for (const c of bp.seed.taxCodes) if (!rates.has(c.name)) await make("tax_code", { name: c.name, rate: c.rate, kind: c.kind, ...(c.tax ? { tax: c.tax } : {}) }, c.name);
 
   return report;
 }

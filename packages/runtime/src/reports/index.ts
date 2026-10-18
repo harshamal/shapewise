@@ -5,13 +5,17 @@ import type { Store, StoredRecord } from "../store";
 import { loadSnapshot, periodOf, viewableModules, visibleReports, type Headline, type PeriodKey, type ReportImpl, type ReportResult, type RunContext, type Snapshot, type Unit } from "./engine";
 import { capacity, lateJobs, productionStatus, qcFailures, scrapByMachine, scrapRate, yieldReport } from "./production";
 import { agedPayables, expenseSummary, openPurchaseOrders, purchasesByVendor } from "./purchases";
+import { balanceSheet, batchCost, cashFlow, cashPosition, grossMargin, profitAndLoss, ssclSummary, trialBalanceReport, vatSummary, whtSummary } from "./ledger";
+import { expiry, reorder, slowMoving, stockMovement, stockOnHand, stockValuation } from "./stock";
 import { agedReceivables, dailyTakings, openOrders, salesByCustomer, salesByItem, salesBySalesperson, salesSummary, salesTrend } from "./sales";
 
 export * from "./engine";
 export { saleLines, openDocuments, ageBucket, AGE_BUCKETS } from "./sales";
 export { seedDemoRecords } from "./demo";
+export { ledgerLines, accountTotals, trialBalance, kindOf } from "./ledger";
+export { stockByItem, suggestedOrder } from "./stock";
 
-/** Reports computed from documents. Stock and ledger reports wait for their engines. */
+/** Every report with an implementation: from documents, the stock engine and the books. */
 export const RECORD_REPORTS: Partial<Record<ReportKey, ReportImpl>> = {
   sales_summary: salesSummary,
   sales_by_customer: salesByCustomer,
@@ -31,6 +35,22 @@ export const RECORD_REPORTS: Partial<Record<ReportKey, ReportImpl>> = {
   scrap_by_machine: scrapByMachine,
   qc_failures: qcFailures,
   capacity,
+  stock_on_hand: stockOnHand,
+  stock_valuation: stockValuation,
+  reorder,
+  slow_moving: slowMoving,
+  expiry,
+  stock_movement: stockMovement,
+  gross_margin: grossMargin,
+  batch_cost: batchCost,
+  profit_and_loss: profitAndLoss,
+  balance_sheet: balanceSheet,
+  trial_balance: trialBalanceReport,
+  cash_position: cashPosition,
+  cash_flow: cashFlow,
+  vat_summary: vatSummary,
+  wht_summary: whtSummary,
+  sscl_summary: ssclSummary,
 };
 
 /** Record types a set of reports reads. */

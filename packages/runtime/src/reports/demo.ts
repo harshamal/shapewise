@@ -1,4 +1,6 @@
+import { taxFlags } from "@shapewise/blueprint";
 import type { Compiled } from "../compile";
+import { replayPostings } from "../engines/replay";
 import { formatNumber } from "../data";
 import type { Store, StoredRecord } from "../store";
 import { addDays, daysBetween } from "./engine";
@@ -9,7 +11,9 @@ import { addDays, daysBetween } from "./engine";
  * to the store (the demos are in memory and reset on restart), dated
  * relative to today, and the same every time for the same day.
  *
- * Only record types switched on in the workspace are written.
+ * Only record types switched on in the workspace are written. Documents
+ * are written in their final state, then the engines post them in date
+ * order, so stock and the books agree with the documents.
  */
 
 interface Catalogue {
@@ -88,7 +92,7 @@ export async function seedDemoRecords(store: Store, tenant: string, compiled: Co
   }
 
   /* masters */
-  const vatOn = compiled.bp.settings.tax.vatRegistered;
+  const vatOn = taxFlags(compiled.bp).vat;
   const vat = vatOn ? put("tax_code", { name: "VAT 18%", rate: 18, kind: "vat" }, "active", today) : "";
   const warehouse = put("warehouse", { code: "MAIN", name: "Main store", kind: "general" }, "active", today);
   const cash = put("bank_account", { name: "Cash in hand", kind: "cash" }, "active", today);
@@ -97,7 +101,19 @@ export async function seedDemoRecords(store: Store, tenant: string, compiled: Co
   const customers = c.customers.map(([name, terms], i) => ({ id: put("customer", { name, payment_terms_days: terms, salesperson: salespeople[i % 2] }, "active", today), terms }));
   const vendors = c.vendors.map(([name, terms]) => ({ id: put("vendor", { name, payment_terms_days: terms }, "active", today), terms }));
   const products = c.products.map(([sku, name, price, cost]) => ({ id: put("item", { sku, name, type: "goods", sales_price: price * 100, purchase_price: cost * 100, track_inventory: true, tax_code: vat || undefined }, "active", today), price, cost }));
-  const materials = c.materials.map(([sku, name, price]) => ({ id: put("item", { sku, name, type: "goods", purchase_price: price * 100, track_inventory: true }, "active", today), price }));
+  // The second material runs low, so the reorder list has something on it.
+  const materials = c.materials.map(([sku, name, price], i) => ({ id: put("item", { sku, name, type: "goods", purchase_price: price * 100, track_inventory: true, reorder_level: i === 1 ? c.batchSize * 4 : undefined, min_order_qty: i === 1 ? c.batchSize : undefined }, "active", today), price }));
+
+  /* opening stock, counted four months ago: plenty of products, the materials the batches use, one lot near its expiry */
+  if (on("stock_adjustment")) {
+    const lot = on("lot") ? put("lot", { lot_no: `OPEN-${c.products[4]![0]}`, item: products[4]!.id, expiry_date: addDays(today, 20) }, "available", today) : "";
+    const lines = [
+      ...products.map((p, i) => ({ _line: `p${i}`, item: p.id, quantity_delta: c.qty[1] * 60, unit_cost: p.cost * 100 })),
+      ...materials.map((m, i) => ({ _line: `m${i}`, item: m.id, quantity_delta: i === 1 ? c.batchSize / 4 : c.batchSize * 10, unit_cost: m.price * 100 })),
+      ...(lot ? [{ _line: "lot", item: products[4]!.id, lot, quantity_delta: c.qty[0] * 2, unit_cost: products[4]!.cost * 100 }] : []),
+    ];
+    put("stock_adjustment", { date: addDays(today, -125), warehouse, reason: "opening", lines }, "posted", addDays(today, -125));
+  }
   const accounts = c.expenses.map(([name, typical], i) => ({ id: put("account", { code: `6${String(i + 1).padStart(3, "0")}`, name, type: "expense" }, "active", today), typical }));
 
   const resources = new Map<string, string>();
@@ -127,6 +143,8 @@ export async function seedDemoRecords(store: Store, tenant: string, compiled: Co
     const due = addDays(date, cu.terms);
     const id = put("invoice", { date, customer: cu.id, due_date: due, salesperson: salespeople.length ? pick(salespeople) : undefined, ...doc, amount_due: doc.total }, back < 2 && rnd() < 0.5 ? "draft" : "posted", date);
     if (id) invoices.push({ id, customer: cu.id, date, total: doc.total, due });
+    // What was invoiced was delivered the same day.
+    if (id && back >= 2) put("delivery_note", { date, customer: cu.id, warehouse, lines: doc.lines.map((l) => ({ _line: l._line, item: l.item, quantity: l.quantity })) }, "delivered", date);
   }
   for (const inv of invoices) {
     const age = daysBetween(inv.date, today);
@@ -154,9 +172,10 @@ export async function seedDemoRecords(store: Store, tenant: string, compiled: Co
 
   /* counter sales for the last three weeks */
   if (on("pos_sale")) {
-    const shift = put("pos_shift", { terminal: "Counter 1", opened_at: `${today}T02:30:00.000Z`, opening_float: 500_000 }, "open", today, false);
     for (let back = 20; back >= 0; back--) {
       const date = addDays(today, -back);
+      // One shift a day, closed at the end of it; today's is still open.
+      const shift = put("pos_shift", { terminal: "Counter 1", opened_at: `${date}T02:30:00.000Z`, opening_float: 500_000 }, back === 0 ? "open" : "closed", date, false);
       const count = back === 0 ? between(6, 12) : between(18, 40);
       for (let k = 0; k < count; k++) {
         const p = pick(products.filter((x) => x.price < 1_000)) ?? products[0]!;
@@ -220,7 +239,8 @@ export async function seedDemoRecords(store: Store, tenant: string, compiled: Co
         const failed = ++made % 6 === 0;
         const bStatus = failed && rnd() < 0.5 ? "rejected" : b === batches - 1 && status === "in_progress" ? "qc_hold" : "released";
         const qc = c.checks.map((check, k) => ({ _line: `q${k}`, check, value: failed && k === made % c.checks.length ? "Out of limit" : "OK", passed: !(failed && k === made % c.checks.length) }));
-        put("batch", { production_order: order, machine, planned_quantity: c.batchSize, output_quantity: Math.round(total - scrap), scrap_quantity: scrap, mfg_date: mfg, qc_results: qc }, bStatus, mfg);
+        const material = [{ _line: "m1", item: materials[0]!.id, quantity: (c === PLASTICS ? 30 : 40) * 4 }];
+        put("batch", { production_order: order, machine, planned_quantity: c.batchSize, output_quantity: Math.round(total - scrap), scrap_quantity: scrap, mfg_date: mfg, qc_results: qc, lines: material }, bStatus, mfg);
       }
     });
   }
@@ -228,6 +248,8 @@ export async function seedDemoRecords(store: Store, tenant: string, compiled: Co
 
   await store.write(tenant, async (tx) => {
     for (const r of out) tx.put(r);
+    let k = 0;
+    await replayPostings(tx, compiled, { now: new Date(`${today}T06:00:00.000Z`), today, newId: (prefix) => `${prefix}demo${(++k).toString(36)}`, actorId: "demo" });
   });
   return out.length;
 }

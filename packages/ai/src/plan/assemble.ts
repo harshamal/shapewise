@@ -1,6 +1,7 @@
 import {
   Blueprint,
   COUNTRY_BY_CODE,
+  businessTaxes,
   CORE_RECORDS,
   EXTENSION_BY_KEY,
   MODULE_BY_KEY,
@@ -82,11 +83,10 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
   /* 2. modules and hidden screens */
   const on = new Set<string>([...[...MODULE_BY_KEY.values()].filter((m) => m.core).map((m) => m.key), ...plan.modules]);
   // A business registered for a tax needs the tax screens (returns, rates, certificates).
-  const taxed = ctx.tax && Object.values(ctx.tax.settings).some(Boolean);
-  if (taxed && !on.has("tax")) {
+  const taxes = ctx.tax ? businessTaxes(where.code, ctx.tax.settings) : undefined;
+  if (taxes?.registered.length && !on.has("tax")) {
     on.add("tax");
-    const t = ctx.tax!.settings;
-    const names = [t.vatRegistered && "VAT", t.ssclRegistered && "SSCL", t.wht && "withholding tax"].filter(Boolean);
+    const names = taxes.registered.filter((t) => !t.with).map((t) => (t.id === "wht" ? "withholding tax" : t.short));
     notes.push(`Switched on Tax for your ${names.join(" and ")} returns.`);
   }
   bp.modules = [...on].map((key) => ({ key, enabled: true }));
@@ -108,14 +108,16 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
   for (const [group, values] of Object.entries(plan.settings)) if (values) s[group] = { ...(s[group] ?? {}), ...values };
   if (ctx.tax) {
     s.tax = { ...ctx.tax.settings };
-    if (plan.settings.tax && Object.entries(plan.settings.tax).some(([k, v]) => v !== undefined && (ctx.tax!.settings as Record<string, unknown>)[k] !== v)) notes.push("Taxes follow your registrations and turnover, not the design.");
+    // The plan may still speak in the old flags; compare them with what was decided.
+    const decided: Record<string, boolean> = { vatRegistered: taxes!.has("value_added", "sales"), ssclRegistered: taxes!.has("levy"), wht: taxes!.has("withholding"), irdTaxInvoice: ctx.tax.settings.invoiceFormat === "lk_ird" };
+    if (plan.settings.tax && Object.entries(plan.settings.tax).some(([k, v]) => v !== undefined && decided[k] !== v)) notes.push("Taxes follow your registrations and turnover, not the design.");
     (bp.seed ??= {}).taxCodes = ctx.tax.taxCodes;
   }
   // The chart of accounts follows the modules: production needs WIP and scrap accounts, stock needs inventory accounts.
   const accounting = (s.accounting ??= {}) as { chartTemplate?: string };
-  const chart = accounting.chartTemplate ?? "lk_trading";
-  const neededChart = on.has("production") ? "lk_manufacturing" : on.has("inventory") && chart === "lk_services" ? "lk_trading" : chart;
-  if (neededChart !== chart) notes.push(`Using the ${neededChart === "lk_manufacturing" ? "manufacturing" : "trading"} chart of accounts to match the modules.`);
+  const chart = (accounting.chartTemplate ?? "trading").replace(/^lk_/, "");
+  const neededChart = on.has("production") ? "manufacturing" : on.has("inventory") && chart === "services" ? "trading" : chart;
+  if (neededChart !== chart) notes.push(`Using the ${neededChart} chart of accounts to match the modules.`);
   accounting.chartTemplate = neededChart;
 
   /* 5. record types first, so everything else can reference them */

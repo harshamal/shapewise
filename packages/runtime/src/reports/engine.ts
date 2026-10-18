@@ -1,6 +1,7 @@
-import { REPORT_BY_KEY, navigation, reportAvailable, type ReportDef, type ReportKey, type ReportSetting } from "@shapewise/blueprint";
+import { REPORT_BY_KEY, navigation, reportAvailable, taxFlags, taxesOf, type BusinessTaxes, type ReportDef, type ReportKey, type ReportSetting } from "@shapewise/blueprint";
 import type { Compiled } from "../compile";
 import { titleOf } from "../data";
+import { ENGINE_TARGETS } from "../engines/context";
 import type { Store, StoredRecord } from "../store";
 
 /**
@@ -51,6 +52,8 @@ export interface Period {
 }
 
 export interface ReportBody {
+  /** The report's name for this business, when it differs from the catalogue's ("GST summary"). */
+  label?: string;
   headline?: Headline;
   columns: ReportColumn[];
   rows: ReportRow[];
@@ -89,6 +92,8 @@ export interface Snapshot {
   get(target: string, id: unknown): StoredRecord | undefined;
   /** Display name of a referenced record, or "" when there is no reference. */
   title(target: string, id: unknown): string;
+  /** The business's taxes, so tax reports use its own names (GST, sales tax). */
+  taxes?: BusinessTaxes;
 }
 
 export function snapshotOf(compiled: Compiled, records: Record<string, StoredRecord[]>): Snapshot {
@@ -97,6 +102,7 @@ export function snapshotOf(compiled: Compiled, records: Record<string, StoredRec
   return {
     list: (target) => records[target] ?? [],
     get: (target, id) => (typeof id === "string" ? byId.get(target)?.get(id) : undefined),
+    taxes: taxesOf(compiled.bp),
     title(target, id) {
       if (typeof id !== "string" || !id) return "";
       const t = compiled.targets.get(target);
@@ -107,9 +113,9 @@ export function snapshotOf(compiled: Compiled, records: Record<string, StoredRec
   };
 }
 
-/** Reads every listed record type that is switched on in this workspace. */
+/** Reads every listed record type that is switched on in this workspace, and the engine records asked for. */
 export async function loadSnapshot(store: Store, tenant: string, compiled: Compiled, targets: Iterable<string>): Promise<Snapshot> {
-  const wanted = [...new Set(targets)].filter((t) => compiled.targets.has(t));
+  const wanted = [...new Set(targets)].filter((t) => compiled.targets.has(t) || (ENGINE_TARGETS as readonly string[]).includes(t));
   const records: Record<string, StoredRecord[]> = {};
   await store.read(tenant, async (tx) => {
     for (const t of wanted) records[t] = await tx.list(t);
@@ -232,7 +238,7 @@ export function viewableModules(compiled: Compiled, roleKey: string): Set<string
 export function visibleReports(compiled: Compiled, roleKey: string, all: readonly ReportDef[]): VisibleReport[] {
   const bp = compiled.bp;
   const enabled = new Set(navigation(bp).flatMap((s) => s.modules.map((m) => m.key)));
-  const ctx = { modules: enabled, extensions: new Set<string>(bp.extensions), tax: { vat: bp.settings.tax.vatRegistered, wht: bp.settings.tax.wht, sscl: bp.settings.tax.ssclRegistered } };
+  const ctx = { modules: enabled, extensions: new Set<string>(bp.extensions), tax: taxFlags(bp) };
   const canSee = viewableModules(compiled, roleKey);
   const roleId = bp.roles.find((r) => r.key === roleKey)?.id;
   const owner = bp.roles.find((r) => r.key === roleKey)?.owner;

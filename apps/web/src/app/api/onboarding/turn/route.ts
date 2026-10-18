@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { BusinessProfile, FACTS, OPENING, createLlm, interviewTurn, type InterviewPrompt, type Message } from "@shapewise/ai";
+import { BusinessProfile, FACTS, MAX_MESSAGE, OPENING, createLlm, interviewTurn, type InterviewPrompt, type Message } from "@shapewise/ai";
 import { getSession } from "@/lib/auth/session";
 import { Attachments, ndjson } from "@/lib/ndjson";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const Text = z.string().max(6000);
+const Text = z.string().max(MAX_MESSAGE);
 const ChatMessage = z.union([
   z.object({ role: z.literal("user"), text: Text, attachments: Attachments }),
   z.object({ role: z.literal("assistant"), text: Text }),
@@ -26,7 +26,7 @@ const Input = z.object({
   history: z.array(ChatMessage).max(80),
   profile: BusinessProfile,
   deferred: Prompt.optional(),
-  message: z.string().trim().min(1).max(4000),
+  message: z.string().trim().min(1),
   attachments: Attachments,
   answering: z.enum(FACTS).optional(),
 });
@@ -36,11 +36,15 @@ const Input = z.object({
  * note and question, then `done` with the new state. Fact questions come
  * back at once, with no model call.
  */
+const tooLong = (n: number) =>
+  `That message is ${n.toLocaleString("en-LK")} characters, more than the ${MAX_MESSAGE.toLocaleString("en-LK")} I can read at once. Attach it as a file instead, or paste the main points.`;
+
 export async function POST(request: Request) {
   if (!(await getSession())) return NextResponse.json({ message: "Please sign in first." }, { status: 401 });
   const parsed = Input.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ message: "That message couldn't be sent. Reload and try again." }, { status: 400 });
   const d = parsed.data;
+  if (d.message.length > MAX_MESSAGE) return NextResponse.json({ message: tooLong(d.message.length) }, { status: 413 });
   return ndjson(async (send) => {
     const history: Message[] = d.history.length ? (d.history as Message[]) : [{ role: "assistant", text: OPENING }];
     const r = await interviewTurn(

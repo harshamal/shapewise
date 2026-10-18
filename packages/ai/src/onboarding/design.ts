@@ -1,4 +1,4 @@
-import { COUNTRY_BY_CODE, CORE_RECORDS, SIZE_LABEL, sizePolicy, type Blueprint, type CoreRecordKey } from "@shapewise/blueprint";
+import { CORE_RECORDS, SIZE_LABEL, countryFor, sizePolicy, type Blueprint, type CoreRecordKey } from "@shapewise/blueprint";
 import { withoutImageData, type Llm, type Usage } from "../llm";
 import { assemble, type AssemblyContext, type PlanIssue } from "../plan/assemble";
 import { salvage } from "../plan/salvage";
@@ -65,7 +65,7 @@ export type DesignProgress =
 export function contextFor(profile: BusinessProfile): { ctx: AssemblyContext; brief: string } {
   const d = derive(profile);
   const policy = sizePolicy(d.size);
-  const country = profile.country ? COUNTRY_BY_CODE.get(profile.country) : undefined;
+  const country = countryFor(profile.country);
   const brief = [
     `Country: ${country?.name ?? "Sri Lanka"} (currency ${country?.currency ?? "LKR"}).`,
     d.size ? `Size: ${SIZE_LABEL[d.size]}. ${policy.guidance}` : "",

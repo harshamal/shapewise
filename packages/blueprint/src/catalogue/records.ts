@@ -2,6 +2,9 @@ import { z } from "zod";
 import type { FieldType, Tone } from "../fields";
 import type { PermAction } from "./actions";
 
+/** Kinds of tax code. "vat" is any value added tax (VAT or GST); a code may also name its tax (TaxDef id) in "tax". */
+export const TAX_CODE_KINDS = ["vat", "sscl", "wht", "exempt", "zero_rated", "sales_tax", "levy"] as const;
+
 /**
  * Core record types: the fixed-core documents and masters the engines own.
  * A blueprint can relabel them, add custom fields, put rules, approvals and
@@ -725,7 +728,7 @@ const RAW_RECORDS: Record<CoreRecordKey, CoreRecord> = {
   /* tax */
   tax_code: {
     key: "tax_code", label: "Tax code", labelPlural: "Tax rates",
-    fields: [f("name", "Name", "text"), f("rate", "Rate", "percent"), f("kind", "Kind", "select", { options: ["vat", "sscl", "wht", "exempt", "zero_rated"] })],
+    fields: [f("name", "Name", "text"), f("rate", "Rate", "percent"), f("kind", "Kind", "select", { options: [...TAX_CODE_KINDS] }), f("tax", "Tax", "text")],
     lifecycle: activeArchived, customFields: [],
   },
   vat_return: {

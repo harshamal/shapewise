@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { COUNTRIES, SIZE_LABEL, TEAM_SIZES, TURNOVER_BANDS } from "@shapewise/blueprint";
+import { SIZE_LABEL, TEAM_SIZES, allCountries, businessTaxes, countryFor, registrableTaxes } from "@shapewise/blueprint";
 import { FIELD_LABEL, LIST_FIELDS, SECTIONS, derive, displayValue, progress, type BusinessProfile } from "@shapewise/ai/client";
 import { cx } from "@shapewise/ui";
 
@@ -71,7 +71,7 @@ export function DerivedCard({ profile }: { profile: BusinessProfile }) {
   const d = derive(profile);
   const confirmed = Boolean(profile.taxConfirmed || profile.taxRegistrations?.length);
   const t = d.tax.settings;
-  const on = [t.vatRegistered && "VAT", t.ssclRegistered && "SSCL", t.wht && "WHT"].filter(Boolean) as string[];
+  const on = businessTaxes(profile.country, t).registered.filter((x) => !x.with).map((x) => x.short);
   return (
     <section className="rounded-2xl border bg-surface p-4 animate-rise">
       <h3 className="text-[11px] tracking-[0.08em] text-ink-faint uppercase">Worked out for you</h3>
@@ -184,9 +184,9 @@ function Editor({ field, profile, onDone }: { field: Key; profile: BusinessProfi
   );
 
   let control: React.ReactNode;
-  if (field === "country") control = select(COUNTRIES);
+  if (field === "country") control = select(allCountries());
   else if (field === "teamSize") control = select(TEAM_SIZES);
-  else if (field === "turnover") control = select(TURNOVER_BANDS);
+  else if (field === "turnover") control = select(countryFor(profile.country ?? "LK")?.turnoverBands ?? []);
   else if (field === "makesThings")
     control = (
       <div className="flex gap-2">
@@ -200,10 +200,10 @@ function Editor({ field, profile, onDone }: { field: Key; profile: BusinessProfi
   else if (field === "taxRegistrations")
     control = (
       <div className="space-y-2">
-        {(["vat", "sscl", "wht"] as const).map((k) => (
+        {registrableTaxes(profile.country ?? "LK").map(({ id: k, kind, label, short }) => (
           <label key={k} className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={regs.includes(k)} onChange={(e) => setRegs((r) => (e.target.checked ? [...r, k] : r.filter((x) => x !== k)))} className="size-4 accent-[var(--sw-accent)]" />
-            {{ vat: "VAT", sscl: "SSCL", wht: "Withholding tax" }[k]}
+            {kind === "withholding" && short !== "TDS" ? label : short}
           </label>
         ))}
         <SaveRow onSave={() => onDone({ ...profile, taxRegistrations: regs as BusinessProfile["taxRegistrations"], taxConfirmed: true })} onCancel={() => onDone()} />

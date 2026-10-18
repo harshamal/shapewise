@@ -6,7 +6,9 @@ import {
   MODULES,
   POSTINGS,
   ROLE_LABEL,
+  chartOf,
   navigation,
+  taxFlags,
   type Blueprint,
   type CoreRecordKey,
   type LedgerLine,
@@ -301,9 +303,12 @@ export function flowGraph(bp: Blueprint): FlowGraph {
     return makes ? p : "goods";
   };
   const label = (k: CoreRecordKey) => where.get(k)?.label ?? CORE_RECORDS[k].labelPlural;
-  const applies = (l: LedgerLine) => !l.when || (l.when === "vat" ? tax.vatRegistered : tax.wht);
+  const flags = taxFlags(bp);
+  const applies = (l: LedgerLine) => !l.when || (l.when === "vat" ? flags.vat : flags.wht);
   const groupOf = (role: string) => ACCOUNT_GROUPS.find((g) => g.roles.includes(role as never));
-  const roleName = (r: string) => ROLE_LABEL[r as keyof typeof ROLE_LABEL] ?? r.replaceAll("_", " ");
+  // Tax accounts are named after the country's taxes (GST output, Sales tax payable).
+  const taxAccount = (r: string) => (ACCOUNT_GROUPS.find((g) => g.key === "tax")!.roles.includes(r as never) && bp.business.country !== "LK" ? chartOf(bp).find((a) => a.role === r)?.name : undefined);
+  const roleName = (r: string) => taxAccount(r) ?? ROLE_LABEL[r as keyof typeof ROLE_LABEL] ?? r.replaceAll("_", " ");
   const stockArcs = new Map<string, Set<string>>();
   const stockWithin = new Map<string, Set<string>>();
   const moneyArcs = new Map<string, Set<string>>();

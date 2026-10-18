@@ -3,7 +3,10 @@ import {
   REPORTS,
   REPORT_BY_KEY,
   applyOps,
+  businessTaxes,
   reportAvailable,
+  taxFlags,
+  taxList,
   type Blueprint,
   type OverlayOp,
   type ReportDef,
@@ -30,7 +33,7 @@ function likelyContext(p: BusinessProfile) {
   if (counter) modules.add("pos");
   const extensions = new Set<string>();
   if (has(p.stockPractices, /expir|lot|batch|shelf/i) || has(p.thingsToTrack, /expir|lot/i)) extensions.add("lots");
-  return { d, modules, extensions, counter, tax: { vat: d.tax.settings.vatRegistered, wht: d.tax.settings.wht, sscl: d.tax.settings.ssclRegistered } };
+  return { d, modules, extensions, counter, tax: taxFlags({ business: { country: p.country ?? "LK" }, settings: { tax: d.tax.settings } }), taxName: taxList(businessTaxes(p.country ?? "LK", d.tax.settings).registered.filter((t) => t.kind === "value_added" || t.kind === "sales")) };
 }
 
 export interface Suggestion {
@@ -59,7 +62,7 @@ export function suggestReports(p: BusinessProfile): Suggestion[] {
     ...(has(p.team, /sales|rep/i) ? ([["sales_by_salesperson", "You have people selling"]] as [string, string][]) : []),
     ["sales_by_customer", "Who your best customers are"],
     ["sales_by_item", "What sells most"],
-    ...(c.tax.vat ? ([["vat_summary", "You're VAT registered"]] as [string, string][]) : []),
+    ...(c.tax.vat ? ([["vat_summary", `You're ${c.taxName || "VAT"} registered`]] as [string, string][]) : []),
     ["gross_margin", "Which products make money"],
     ["stock_valuation", "What your stock is worth"],
     ...(c.d.size === "medium" || c.d.size === "large" ? ([["budget_vs_actual", "Larger businesses run to a budget"]] as [string, string][]) : []),
@@ -81,7 +84,7 @@ export function availableReports(bp: Blueprint): ReportDef[] {
   const ctx = {
     modules: new Set(bp.modules.filter((m) => m.enabled).map((m) => m.key)),
     extensions: new Set<string>(bp.extensions),
-    tax: { vat: bp.settings.tax.vatRegistered, wht: bp.settings.tax.wht, sscl: bp.settings.tax.ssclRegistered },
+    tax: taxFlags(bp),
   };
   return REPORTS.filter((r) => reportAvailable(r, ctx));
 }

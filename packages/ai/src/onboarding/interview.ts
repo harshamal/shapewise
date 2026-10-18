@@ -1,14 +1,15 @@
 import { z } from "zod";
-import { COUNTRIES, COUNTRY_BY_CODE, LK_TAX, SIZE_LABEL, TEAM_SIZES, TURNOVER_BANDS, findCountry, sizePolicy } from "@shapewise/blueprint";
+import { COUNTRIES, COUNTRY_BY_CODE, SIZE_LABEL, TEAM_SIZES, businessTaxes, countryFor, findCountry, moneyWords, parseOwnRates, registrableTaxes, sizePolicy, turnoverBand, type TaxDef } from "@shapewise/blueprint";
 import { withoutImageData, type Attachment, type Llm, type Message, type Usage } from "../llm";
 import { PLACE_OPTIONS, suggestReports } from "./analytics";
-import { ProfileUpdate, derive, mergeProfile, profileReady, type BusinessProfile, type Section } from "./profile";
+import { ProfileUpdate, bandsFor, derive, mergeProfile, profileReady, type BusinessProfile, type Section } from "./profile";
 
 /**
  * The onboarding interview. Two kinds of question:
  *
- * - Facts with fixed answers (country, team size, yearly sales, tax
- *   registrations) are asked by code. They need no model call, so they
+ * - Facts with fixed answers (country, team size, yearly sales in the
+ *   country's own bands, tax registrations, and tax rates where none are
+ *   built in) are asked by code. They need no model call, so they
  *   appear instantly, and code derives the size class and taxes from them.
  * - Everything about how the business runs is asked by the model, which
  *   replies and updates the profile in one structured answer.
@@ -44,7 +45,7 @@ export const TOPIC_LABEL: Record<Topic, string> = {
   wrap_up: "Ready to build",
 };
 
-export const FACTS = ["country", "teamSize", "turnover", "taxes", "reports", "reportPlaces"] as const;
+export const FACTS = ["country", "teamSize", "turnover", "taxes", "taxRates", "reports", "reportPlaces"] as const;
 export type Fact = (typeof FACTS)[number];
 
 export const AnswerInput = z.object({
@@ -88,7 +89,7 @@ export interface InterviewPrompt {
   preselected?: string[];
 }
 
-const SYSTEM = `You set up business software for small and medium businesses by interviewing the owner. Most are in Sri Lanka.
+const SYSTEM = `You set up business software for small and medium businesses by interviewing the owner. They can be in any country; many are in Sri Lanka.
 You are a sharp, experienced operations consultant: calm, precise, warm, never chatty. No jargon (never say module, entity, schema, blueprint, field).
 
 Style: plain sentences. Never use dashes as punctuation (no em dash, no en dash, no spaced hyphen); use a comma, a full stop or "and" instead.
@@ -192,18 +193,29 @@ export function cleanInput(input: AnswerInput): AnswerInput {
 
 /* ------------------------------------------------------- fact questions */
 
-const TAX_OPTION = { vat: "VAT", sscl: "SSCL", wht: "Withholding tax" } as const;
 const NONE_OPTION = "Not registered for any";
 const MAIN_COUNTRIES = ["LK", "MV", "IN", "AE", "SG", "AU", "GB", "US"];
+
+/** "Under £90,000" reads "under £90,000" mid sentence; "Rs 60 to 250 million" stays as it is. */
+const midSentence = (label: string) => label.replace(/^(Under|Over)\b/, (w) => w.toLowerCase());
+/** One significant figure, for an example amount. */
+const roughly = (n: number) => Number(n.toPrecision(1));
+
+/** A registered tax with no rates built in (US sales tax), whose rates the business gives. */
+function needsOwnRates(p: BusinessProfile): boolean {
+  const c = countryFor(p.country);
+  if (!c?.ownRates || p.ownRates) return false;
+  return derive(p).tax.settings.registered.some((id) => c.taxes.find((t) => t.id === id)?.rates.length === 0);
+}
 
 /** The next fact code should ask, once the basics are known. */
 export function nextFact(p: BusinessProfile): Fact | undefined {
   if (!p.businessName || !p.whatTheyDo) return undefined;
   if (!p.country) return "country";
   if (!p.teamSize) return "teamSize";
-  const taxRules = COUNTRY_BY_CODE.get(p.country)?.taxRules;
-  if (taxRules && !p.turnover) return "turnover";
-  if (taxRules && !p.taxConfirmed && !p.taxRegistrations?.length) return "taxes";
+  if (bandsFor(p).length && !turnoverBand(p.turnover, p.country)) return "turnover";
+  if (!p.taxConfirmed && !p.taxRegistrations?.length) return "taxes";
+  if (needsOwnRates(p)) return "taxRates";
   // Reports once there's enough to suggest well: what they sell, whether they make things, and who works there.
   if (profileReady(p) && (p.team?.length || p.documents?.length)) {
     if (!p.reportsConfirmed) return "reports";
@@ -214,6 +226,7 @@ export function nextFact(p: BusinessProfile): Fact | undefined {
 
 export function factPrompt(fact: Fact, p: BusinessProfile, note = ""): InterviewPrompt {
   const base = { fact, section: "size" as const, topic: "business" as const, note };
+  const country = countryFor(p.country);
   switch (fact) {
     case "country":
       return {
@@ -229,14 +242,17 @@ export function factPrompt(fact: Fact, p: BusinessProfile, note = ""): Interview
         question: "How many people work in the business, including you?",
         input: { kind: "single", options: TEAM_SIZES.map((t) => t.label), placeholder: "e.g. 12 people" },
       };
-    case "turnover":
+    case "turnover": {
+      const bands = bandsFor(p);
+      const example = bands[Math.min(3, bands.length - 1)]!;
       return {
         ...base,
         topicLabel: "Size",
         note: note || "This decides which taxes apply and how much control the setup needs. It stays private to your workspace.",
         question: "Roughly what are your sales in a year?",
-        input: { kind: "single", options: TURNOVER_BANDS.map((t) => t.label), placeholder: "e.g. about Rs 80 million" },
+        input: { kind: "single", options: bands.map((t) => t.label), placeholder: `e.g. about ${moneyWords(country!, roughly(Math.max(example.min, 1) * (4 / 3)))}` },
       };
+    }
     case "reports": {
       const s = suggestReports(p).slice(0, 8);
       return {
@@ -260,25 +276,70 @@ export function factPrompt(fact: Fact, p: BusinessProfile, note = ""): Interview
         preselected: PLACE_OPTIONS.slice(0, 2).map((o) => o.label),
       };
     case "taxes": {
+      const taxes = registrableTaxes(p.country);
+      if (!country?.taxRules || !taxes.length) {
+        const why = `I don't have tax rules built in for ${country?.name ?? "your country"}, so tell me the taxes you charge and I'll set them up. Say none if you don't charge any.`;
+        return {
+          ...base,
+          topicLabel: "Taxes",
+          note: note ? `${note} ${why}` : why,
+          question: "Which taxes do you charge on sales, and at what rate?",
+          input: { kind: "text", options: [], placeholder: "e.g. VAT 16%" },
+        };
+      }
       const d = derive({ ...p, taxConfirmed: false, taxRegistrations: undefined });
-      const pre = [d.tax.settings.vatRegistered && TAX_OPTION.vat, d.tax.settings.ssclRegistered && TAX_OPTION.sscl].filter(Boolean) as string[];
-      const band = TURNOVER_BANDS.find((t) => t.key === p.turnover);
+      const pre = taxes.filter((t) => d.tax.settings.registered.includes(t.id));
+      const band = turnoverBand(p.turnover, p.country);
+      const thresholded = taxes.filter((t) => t.annualThreshold !== undefined);
+      const names = (ts: typeof taxes) => (ts.length > 1 ? `${ts.slice(0, -1).map((t) => t.short).join(", ")} and ${ts.at(-1)!.short}` : (ts[0]?.short ?? ""));
       const why = pre.length
-        ? `At ${band?.label.toLowerCase().replace(/^rs/, "Rs")} a year you're above the ${pre.includes("VAT") ? `VAT threshold (Rs ${LK_TAX.vat.annualThreshold! / 1e6} million)` : ""}${pre.length === 2 ? " and the " : ""}${pre.includes("SSCL") ? `SSCL threshold (Rs ${LK_TAX.sscl.annualThreshold! / 1e6} million)` : ""}, so I've ticked ${pre.length === 2 ? "both" : "it"}.`
-        : "You're under the VAT and SSCL thresholds, so registration isn't required, though some businesses register by choice.";
+        ? `At ${band ? midSentence(band.label) : "your turnover"} a year you're above the ${pre.map((t) => `${t.short} threshold (${moneyWords(country, t.annualThreshold!)})`).join(" and the ")}, so I've ticked ${pre.length === 2 ? "both" : pre.length > 2 ? "them" : "it"}.`
+        : thresholded.length && band
+          ? `You're under the ${names(thresholded)} threshold${thresholded.length > 1 ? "s" : ""}, so registration isn't required, though some businesses register by choice.`
+          : (taxes.find((t) => t.note)?.note ?? "Tick the taxes the business is registered for.");
       return {
         ...base,
         topicLabel: "Taxes",
         note: note ? `${note} ${why}` : why,
         question: "Which taxes is the business registered for?",
-        input: { kind: "multi", options: [TAX_OPTION.vat, TAX_OPTION.sscl, TAX_OPTION.wht, NONE_OPTION], placeholder: "e.g. VAT and SSCL" },
-        preselected: pre,
+        input: { kind: "multi", options: [...taxes.map(optionLabel), NONE_OPTION], placeholder: `e.g. ${taxes.slice(0, 2).map((t) => t.short).join(" and ")}` },
+        preselected: pre.map(optionLabel),
+      };
+    }
+    case "taxRates": {
+      const own = country?.ownRates;
+      return {
+        ...base,
+        topicLabel: "Taxes",
+        note: note || "Each place sets its own rate, so give me yours. You can add more later.",
+        question: own?.question ?? "Which tax rates do you charge?",
+        input: { kind: "text", options: [], placeholder: own?.placeholder ?? "e.g. VAT 16%" },
       };
     }
   }
 }
 
+/** How a tax is offered: withholding by its name ("Withholding tax"), the rest by their short name ("VAT", "TDS"). */
+const optionLabel = (t: TaxDef) => (t.kind === "withholding" && t.short !== "TDS" ? t.label : t.short);
+
 const has = (text: string, label: string) => text.toLowerCase().includes(label.toLowerCase());
+const saysNone = (a: string) => /^(none|no|nothing|not registered|we don't|we do not|n\/a)\b/i.test(a.trim());
+
+/** Read an amount in the person's words ("80 million", "₹2 crore", "£250k") as a number in their currency. */
+function readAmount(a: string): number | undefined {
+  const m = /([\d.,]+)\s*(m|mn|million|b|bn|billion|k|thousand|lakhs?|lacs?|crores?|cr)?\b/i.exec(a);
+  if (!m) return undefined;
+  const n = Number(m[1]!.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return undefined;
+  const unit = (m[2] ?? "").toLowerCase();
+  if (unit.startsWith("b")) return n * 1e9;
+  if (unit.startsWith("m")) return n * 1e6;
+  if (unit === "k" || unit === "thousand") return n * 1e3;
+  if (unit.startsWith("la")) return n * 1e5;
+  if (unit.startsWith("cr")) return n * 1e7;
+  // A bare small number is in millions ("about 80").
+  return n < 10_000 ? n * 1e6 : n;
+}
 
 /** Apply a fact answer. Returns a problem to ask again with when the answer doesn't fit. */
 export function applyFact(fact: Fact, answer: string, p: BusinessProfile): { profile: BusinessProfile; problem?: string } {
@@ -286,8 +347,10 @@ export function applyFact(fact: Fact, answer: string, p: BusinessProfile): { pro
   switch (fact) {
     case "country": {
       const c = findCountry(a);
-      if (!c) return { profile: p, problem: `I don't have built in rules for ${a} yet. Pick the closest of these and you can set your own tax rates later.` };
-      return { profile: mergeProfile(p, { country: c.code }) };
+      if (!c) return { profile: p, problem: `I couldn't find ${a}. Type the country's name in English, for example Kenya.` };
+      // A new country starts its turnover and taxes again, in its own terms.
+      const reset = p.country && p.country !== c.code ? { turnover: undefined, taxRegistrations: undefined, taxConfirmed: undefined, ownRates: undefined } : {};
+      return { profile: mergeProfile({ ...p, ...reset }, { country: c.code }) };
     }
     case "teamSize": {
       const byLabel = TEAM_SIZES.find((t) => t.label.toLowerCase() === a.toLowerCase());
@@ -297,17 +360,12 @@ export function applyFact(fact: Fact, answer: string, p: BusinessProfile): { pro
       return { profile: mergeProfile(p, { teamSize: t.key }) };
     }
     case "turnover": {
-      const byLabel = TURNOVER_BANDS.find((t) => t.label.toLowerCase() === a.toLowerCase());
-      const m = /([\d.,]+)\s*(m|mn|million|b|bn|billion|k|lakhs?|crore)?/i.exec(a.replace(/rs\.?/i, ""));
-      let rs: number | undefined;
-      if (m) {
-        const n = Number(m[1]!.replace(/,/g, ""));
-        const unit = (m[2] ?? "").toLowerCase();
-        rs = n * (unit.startsWith("b") ? 1e9 : unit.startsWith("m") ? 1e6 : unit === "k" ? 1e3 : unit.startsWith("lakh") ? 1e5 : unit === "crore" ? 1e7 : n < 10_000 ? 1e6 : 1);
-      }
-      const t = byLabel ?? (rs !== undefined ? TURNOVER_BANDS.find((x) => rs! < x.max) : undefined);
+      const bands = bandsFor(p);
+      const byLabel = bands.find((t) => t.label.toLowerCase() === a.toLowerCase());
+      const amount = byLabel ? undefined : readAmount(a);
+      const t = byLabel ?? (amount !== undefined ? bands.find((x) => amount < x.max) : undefined);
       if (!t) return { profile: p, problem: "A rough band is fine. Pick the closest." };
-      return { profile: mergeProfile(p, { turnover: t.key }) };
+      return { profile: mergeProfile(p, { turnover: t.key as BusinessProfile["turnover"] }) };
     }
     case "reports": {
       const offered = suggestReports(p);
@@ -322,8 +380,21 @@ export function applyFact(fact: Fact, answer: string, p: BusinessProfile): { pro
       return { profile: mergeProfile(p, { reportPlaces: guess }) };
     }
     case "taxes": {
-      const regs = has(a, NONE_OPTION) || /^(none|no|not registered)/i.test(a) ? [] : (Object.entries(TAX_OPTION) as [keyof typeof TAX_OPTION, string][]).filter(([k, label]) => has(a, label) || has(a, k)).map(([k]) => k);
-      return { profile: mergeProfile(p, { taxRegistrations: regs, taxConfirmed: true }) };
+      const taxes = registrableTaxes(p.country);
+      if (!countryFor(p.country)?.taxRules || !taxes.length) {
+        if (saysNone(a)) return { profile: mergeProfile(p, { taxRegistrations: [], ownRates: [], taxConfirmed: true }) };
+        const rates = parseOwnRates(a);
+        if (!rates.length) return { profile: p, problem: "Give each tax with its rate, for example VAT 16%, or say none." };
+        return { profile: mergeProfile(p, { taxRegistrations: [], ownRates: rates, taxConfirmed: true }) };
+      }
+      const regs = has(a, NONE_OPTION) || saysNone(a) ? [] : taxes.filter((t) => new RegExp(`\\b${t.short.replace(/\s+/g, "\\s+")}\\b`, "i").test(a) || new RegExp(`\\b${t.id}\\b`, "i").test(a) || has(a, t.label)).map((t) => t.id);
+      return { profile: mergeProfile(p, { taxRegistrations: regs as BusinessProfile["taxRegistrations"], taxConfirmed: true }) };
+    }
+    case "taxRates": {
+      if (saysNone(a) || /^later\b/i.test(a)) return { profile: mergeProfile(p, { ownRates: [] }) };
+      const rates = parseOwnRates(a);
+      if (!rates.length) return { profile: p, problem: `Give each with its rate, ${countryFor(p.country)?.ownRates?.placeholder.replace(/^e\.g\./, "for example") ?? "for example VAT 16%"}.` };
+      return { profile: mergeProfile(p, { ownRates: rates }) };
     }
   }
 }
@@ -333,10 +404,10 @@ function factsSummary(p: BusinessProfile): string {
   const d = derive(p);
   const parts: string[] = [];
   if (d.size) parts.push(`${SIZE_LABEL[d.size]} business${d.countryName ? ` in ${d.countryName}` : ""}`);
-  const taxes = [d.tax.settings.vatRegistered && "VAT", d.tax.settings.ssclRegistered && "SSCL", d.tax.settings.wht && "withholding tax"].filter(Boolean);
+  const registered = businessTaxes(p.country, d.tax.settings).registered.filter((t) => !t.with);
+  const taxes = registered.map((t) => (t.id === "wht" ? "withholding tax" : t.short));
   const list = taxes.length > 1 ? `${taxes.slice(0, -1).join(", ")} and ${taxes.at(-1)}` : taxes[0];
-  if (COUNTRY_BY_CODE.get(p.country ?? "")?.taxRules) parts.push(list ? `invoices will handle ${list}` : "no tax registrations for now");
-  else if (p.country) parts.push("taxes start off and you can add your own rates");
+  if (p.country) parts.push(list ? `invoices will handle ${list}` : countryFor(p.country)?.taxRules ? "no tax registrations for now" : "no taxes for now, and you can add your own later");
   const line = parts.join(", ");
   const warn = d.tax.warnings[0];
   return line ? `${line[0]!.toUpperCase()}${line.slice(1)}.${warn ? ` ${warn}` : ""}` : "";
@@ -347,7 +418,7 @@ function factsSummary(p: BusinessProfile): string {
 function systemFor(p: BusinessProfile): string {
   const d = derive(p);
   const facts = [
-    d.countryName && `Country: ${d.countryName}.`,
+    d.countryName && `Country: ${d.countryName} (amounts in ${countryFor(p.country)?.currency}).`,
     d.size && `Size: ${SIZE_LABEL[d.size]} (${sizePolicy(d.size).guidance})`,
     p.taxConfirmed || p.taxRegistrations?.length ? `Taxes: ${d.tax.reasons.join(" ")}` : undefined,
   ].filter(Boolean);
@@ -365,8 +436,11 @@ export interface PartialPrompt {
   question?: string;
 }
 
+/** Longest message the interview reads, in characters: enough for a pasted page about the business. */
+export const MAX_MESSAGE = 20_000;
+
 export async function interviewTurn(llm: Llm, state: InterviewState, input: InterviewInput, onPartial?: (p: PartialPrompt) => void): Promise<InterviewResult> {
-  const message = input.message.slice(0, 4000);
+  const message = input.message.slice(0, MAX_MESSAGE);
   let profile = state.profile;
   let history: Message[] = withoutImageData(state.history);
 

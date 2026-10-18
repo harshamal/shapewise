@@ -1,5 +1,7 @@
 import { z } from "zod";
+import type { ChartTemplateKey } from "./catalogue/accounts";
 import { CORE_RECORD_KEYS } from "./catalogue/records";
+import { TAX_KINDS } from "./jurisdiction";
 
 /**
  * Business rules the engines read, grouped like SyncBooks' settings screens.
@@ -91,23 +93,65 @@ export const ProductionSettings = z
 
 export const AccountingSettings = z
   .object({
-    /** Seeded chart of accounts. */
-    chartTemplate: z.enum(["lk_services", "lk_trading", "lk_manufacturing"]).default("lk_trading"),
+    /**
+     * Seeded chart of accounts. The country adds its tax accounts (GST for
+     * India, VAT for the UK); the old Sri Lankan keys (lk_trading) still parse.
+     */
+    chartTemplate: z
+      .enum(["services", "trading", "manufacturing", "lk_services", "lk_trading", "lk_manufacturing"])
+      .default("trading")
+      .transform((k) => k.replace(/^lk_/, "") as ChartTemplateKey),
     budgetEnforcement: Mode.default("off"),
     /** Cost centres on journal lines. */
     costCentres: z.boolean().default(false),
   })
   .prefault({});
 
+const TaxId = z.string().regex(/^[a-z][a-z0-9_]{1,23}$/);
+
+/** A tax the business named itself, for a country without built in rules or anything missing. */
+export const CustomTaxSetting = z.object({
+  id: TaxId,
+  label: z.string().trim().min(1).max(40),
+  kind: z.enum(TAX_KINDS),
+  rate: z.number().min(0).max(100),
+  appliesTo: z.enum(["sales", "purchases", "both"]).optional(),
+});
+
+/**
+ * Taxes the business is registered for, by id from its country's taxes
+ * (jurisdiction.ts) or its own custom ones. "vat", "sscl" and "wht" also
+ * stand for the country's value added tax, levy and withholding tax.
+ *
+ * Blueprints written before countries were data have vatRegistered,
+ * ssclRegistered, wht and irdTaxInvoice. They still parse: true adds the
+ * tax, false takes it out, and the IRD format becomes invoiceFormat "lk_ird".
+ */
 export const TaxSettings = z
   .object({
-    vatRegistered: z.boolean().default(false),
-    /** Sri Lanka social security contribution levy. */
-    ssclRegistered: z.boolean().default(false),
-    /** Withholding tax deducted on payments and receipts. */
-    wht: z.boolean().default(false),
-    /** IRD tax invoice format on invoices. */
-    irdTaxInvoice: z.boolean().default(false),
+    registered: z.array(TaxId).max(12).default([]),
+    custom: z.array(CustomTaxSetting).max(8).default([]),
+    /** A country invoice format, e.g. "lk_ird" (Sri Lanka IRD tax invoice). */
+    invoiceFormat: z.string().max(30).nullish(),
+    vatRegistered: z.boolean().optional(),
+    ssclRegistered: z.boolean().optional(),
+    wht: z.boolean().optional(),
+    irdTaxInvoice: z.boolean().optional(),
+  })
+  .transform(({ vatRegistered, ssclRegistered, wht, irdTaxInvoice, ...t }) => {
+    const registered = [...new Set(t.registered)];
+    const set = (id: string, on: boolean | undefined) => {
+      const i = registered.indexOf(id);
+      if (on === true && i < 0) registered.push(id);
+      if (on === false && i >= 0) registered.splice(i, 1);
+    };
+    set("vat", vatRegistered);
+    set("sscl", ssclRegistered);
+    set("wht", wht);
+    let invoiceFormat = t.invoiceFormat ?? undefined;
+    if (irdTaxInvoice === true) invoiceFormat = "lk_ird";
+    if (irdTaxInvoice === false && invoiceFormat === "lk_ird") invoiceFormat = undefined;
+    return { registered, custom: t.custom, ...(invoiceFormat ? { invoiceFormat } : {}) } as { registered: string[]; custom: z.infer<typeof CustomTaxSetting>[]; invoiceFormat?: string };
   })
   .prefault({});
 

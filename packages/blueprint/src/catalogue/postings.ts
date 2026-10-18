@@ -83,7 +83,7 @@ export const ACCOUNT_GROUPS: readonly { key: string; label: string; roles: reado
   { key: "bank", label: "Bank and cash", roles: ["bank", "cash", "bank_charges"] },
   { key: "trading", label: "Sales and costs", roles: ["sales", "service_income", "sales_discounts", "cogs"] },
   { key: "stock", label: "Stock value", roles: ["inventory", "inventory_raw", "inventory_wip", "inventory_fg", "stock_adjustment", "scrap", "production_variance", "labour_absorbed", "overhead_absorbed"] },
-  { key: "tax", label: "Taxes", roles: ["vat_output", "vat_input", "sscl_payable", "wht_receivable", "wht_payable"] },
+  { key: "tax", label: "Taxes", roles: ["vat_output", "vat_input", "cgst_output", "cgst_input", "sgst_output", "sgst_input", "sscl_payable", "wht_receivable", "wht_payable"] },
   { key: "other", label: "Expenses, assets", roles: ["purchases_expense", "fixed_assets", "accumulated_depreciation", "depreciation", "asset_disposal", "fx_gain_loss", "rounding", "retained_earnings", "opening_balance_equity"] },
 ];
 

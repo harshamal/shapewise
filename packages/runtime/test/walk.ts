@@ -1,5 +1,6 @@
-import { MemoryStore, compile, createExecutor, previewConversion, type CField, type Command, type CommandResult, type CTarget } from "../src";
+import { JOURNAL, MemoryStore, STOCK_LEVEL, compile, createExecutor, previewConversion, type CField, type Command, type CommandResult, type CTarget } from "../src";
 import type { Blueprint } from "@shapewise/blueprint";
+import { snapshotOf, trialBalance } from "../src/reports";
 
 /**
  * Walks every document a blueprint switches on: creates one with valid
@@ -98,7 +99,16 @@ export async function walk(bp: Blueprint): Promise<WalkResult[]> {
     const t = c.targets.get(target);
     if (!t || depth > 4) return undefined;
     const r = await run({ type: "record.create", target, data: await dataFor(t, depth) });
+    if (r.status === "ok" && target === "item") await openingStock(r.recordId!, depth);
     return r.status === "ok" ? r.recordId : undefined;
+  };
+  // Goods start with stock on hand, as they would after a stock count, so selling and making don't run short.
+  const openingStock = async (item: string, depth: number) => {
+    if (!c.targets.has("stock_adjustment")) return;
+    const warehouse = await ensure("warehouse", depth + 1);
+    if (!warehouse) return;
+    const r = await run({ type: "record.create", target: "stock_adjustment", data: { date: "2026-10-16", warehouse, reason: "opening", lines: [{ item, quantity_delta: 1000, unit_cost: 10 }] } });
+    if (r.status === "ok") await settle(await run({ type: "record.action", target: "stock_adjustment", recordId: r.recordId!, action: "post" } as Command));
   };
   const ensure = async (target: string, depth: number): Promise<string | undefined> => {
     if (made.has(target)) return made.get(target);
@@ -117,6 +127,7 @@ export async function walk(bp: Blueprint): Promise<WalkResult[]> {
     }
     const id = r.recordId!;
     made.set(t.target, made.get(t.target) ?? id);
+    if (t.target === "item") await openingStock(id, 0);
     steps.push("create");
     let problem: string | undefined;
     for (let guard = 0; guard < 10; guard++) {
@@ -154,6 +165,13 @@ export async function walk(bp: Blueprint): Promise<WalkResult[]> {
     }
     results.push({ target: t.target, label: t.labelPlural, steps, ok: !problem, problem });
   }
+  // After everything, the books balance and stock at cost equals the stock accounts.
+  const [journal, accounts, levels] = await store.read("t_walk", async (tx) => [await tx.list(JOURNAL), await tx.list("account"), await tx.list(STOCK_LEVEL)]);
+  const tb = trialBalance(snapshotOf(c, { [JOURNAL]: journal, account: accounts }));
+  const stockValue = levels.reduce((s, l) => s + (l.data.value as number), 0);
+  const inventory = accounts.filter((a) => a.data.subtype === "inventory" && !/progress/i.test(String(a.data.name))).reduce((s, a) => s + ((a.data.balance as number) ?? 0), 0);
+  const books = !tb.balanced ? `debits ${tb.debit} against credits ${tb.credit}` : stockValue !== inventory ? `stock worth ${stockValue} against stock accounts of ${inventory}` : undefined;
+  results.push({ target: "_books", label: "Books", steps: [`${journal.length} entries`], ok: !books, problem: books });
   return results;
 
   /** The pre-filled form with its empty required fields filled in, as create input (money back in major units). */

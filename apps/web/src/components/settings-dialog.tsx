@@ -139,18 +139,7 @@ function Section({ data, tab }: { data: SettingsData; tab: string }) {
         />
       );
     case "tax_settings":
-      return (
-        <Controls
-          data={data}
-          intro={`Chart of accounts: ${data.chartLabel}.`}
-          rows={[
-            { path: "tax.vatRegistered", label: "VAT registered", kind: "toggle", value: s.tax.vatRegistered },
-            { path: "tax.ssclRegistered", label: "SSCL registered", kind: "toggle", value: s.tax.ssclRegistered },
-            { path: "tax.wht", label: "Withholding tax on payments and receipts", kind: "toggle", value: s.tax.wht },
-            { path: "tax.irdTaxInvoice", label: "IRD tax invoice format", kind: "toggle", value: s.tax.irdTaxInvoice },
-          ]}
-        />
-      );
+      return <TaxSettings data={data} />;
     case "inventory_rules":
       return (
         <Controls
@@ -183,6 +172,122 @@ function Section({ data, tab }: { data: SettingsData; tab: string }) {
     default:
       return <p className="text-sm text-ink-muted">Nothing to set here yet.</p>;
   }
+}
+
+/* ---------------------------------------------------------------------- tax */
+
+/**
+ * The country's taxes as switches, its invoice formats, and taxes the
+ * business names itself (any country, and the only kind where nothing is
+ * built in). Each change goes through applyOps like any other setting.
+ */
+function TaxSettings({ data }: { data: SettingsData }) {
+  const { apply, pending, status } = useApply(data.tenant);
+  const t = data.settings.tax;
+  const disabled = pending || !data.canManage;
+  const [draft, setDraft] = useState({ label: "", rate: "", kind: "value_added" });
+  const setRegistered = (id: string, on: boolean) => apply([{ op: "set_setting", path: "tax.registered", value: on ? [...new Set([...t.registered, id])] : t.registered.filter((x) => x !== id) }]);
+  const addOwn = () => {
+    const rate = Number(draft.rate);
+    if (!draft.label.trim() || !Number.isFinite(rate)) return;
+    const slug = draft.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 18) || "tax";
+    let id = `own_${slug}`;
+    if (t.custom.some((c) => c.id === id)) id = `${id}_${t.custom.length + 1}`;
+    apply([
+      { op: "set_setting", path: "tax.custom", value: [...t.custom, { id, label: draft.label.trim(), kind: draft.kind, rate }] },
+      { op: "set_setting", path: "tax.registered", value: [...t.registered, id] },
+    ]);
+    setDraft({ label: "", rate: "", kind: "value_added" });
+  };
+  const removeOwn = (id: string) =>
+    apply([
+      { op: "set_setting", path: "tax.custom", value: t.custom.filter((c) => c.id !== id) },
+      { op: "set_setting", path: "tax.registered", value: t.registered.filter((x) => x !== id) },
+    ]);
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-ink-muted">
+        {data.tax.builtIn ? `Taxes for ${data.tax.countryName}, with their rates and thresholds built in. Check them with your accountant.` : `No tax rules are built in for ${data.tax.countryName}. Add the taxes you charge below.`} Chart of accounts: {data.chartLabel}.
+      </p>
+      {!data.canManage && <p className="text-sm text-ink-muted">Your role can see these settings but not change them.</p>}
+      <StatusLine status={status} />
+      {data.tax.taxes.length > 0 && (
+        <ul className="divide-y rounded-sw border bg-surface">
+          {data.tax.taxes.map((x) => (
+            <li key={x.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">{x.label}</p>
+                <p className="text-xs text-ink-muted">{x.hint}</p>
+              </div>
+              <Switch label={x.label} checked={t.registered.includes(x.id)} disabled={disabled} onChange={(v) => setRegistered(x.id, v)} />
+            </li>
+          ))}
+          {data.tax.invoiceFormats.length > 0 && (
+            <li className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+              <p className="min-w-0 flex-1 text-sm">Invoice format</p>
+              <div className="w-56 max-w-full">
+                <Select aria-label="Invoice format" className="h-8" value={t.invoiceFormat ?? ""} disabled={disabled} onChange={(e) => apply([{ op: "set_setting", path: "tax.invoiceFormat", value: e.target.value || null }])}>
+                  <option value="">Standard invoice</option>
+                  {data.tax.invoiceFormats.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </li>
+          )}
+        </ul>
+      )}
+      <section aria-labelledby="own-taxes" className="space-y-2">
+        <h4 id="own-taxes" className="text-xs text-ink-muted">
+          Your own taxes
+        </h4>
+        <ul className="divide-y rounded-sw border bg-surface">
+          {t.custom.length === 0 && !data.canManage && <li className="px-4 py-3 text-sm text-ink-muted">None.</li>}
+          {t.custom.map((c) => (
+            <li key={c.id} className="flex items-center gap-4 px-4 py-3 text-sm">
+              <span className="flex-1">
+                {c.label} {c.rate}%<span className="ml-2 text-xs text-ink-muted">{data.tax.kinds.find(([k]) => k === c.kind)?.[1]}</span>
+              </span>
+              {data.canManage && (
+                <Button type="button" variant="ghost" disabled={pending} onClick={() => removeOwn(c.id)}>
+                  Remove
+                </Button>
+              )}
+            </li>
+          ))}
+          {data.canManage && (
+            <li className="flex flex-wrap items-end gap-3 px-4 py-3">
+              <label className="block min-w-40 flex-1">
+                <span className="mb-1 block text-xs text-ink-muted">Name</span>
+                <Input className="h-8" placeholder="e.g. VAT" value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} />
+              </label>
+              <label className="block w-24">
+                <span className="mb-1 block text-xs text-ink-muted">Rate %</span>
+                <Input className="h-8" inputMode="decimal" placeholder="16" value={draft.rate} onChange={(e) => setDraft((d) => ({ ...d, rate: e.target.value }))} />
+              </label>
+              <label className="block w-44">
+                <span className="mb-1 block text-xs text-ink-muted">Kind</span>
+                <Select className="h-8" value={draft.kind} onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value }))}>
+                  {data.tax.kinds.map(([k, l]) => (
+                    <option key={k} value={k}>
+                      {l}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <Button type="button" disabled={pending || !draft.label.trim() || !draft.rate} onClick={addOwn}>
+                Add tax
+              </Button>
+            </li>
+          )}
+        </ul>
+        <p className="text-xs text-ink-muted">Then add its rate in Tax rates, so invoices and bills can use it.</p>
+      </section>
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ editing */
@@ -294,7 +399,13 @@ function Switch({ label, checked, disabled, onChange }: { label: string; checked
 function Organisation({ data }: { data: SettingsData }) {
   const { apply, pending, status } = useApply(data.tenant);
   const b = data.business;
-  const [form, setForm] = useState({ name: b.name, legalName: b.legalName ?? "", tin: b.tin ?? "", vatNo: b.vatNo ?? "", brNo: b.brNo ?? "", timezone: b.timezone, fiscalYearStartMonth: String(b.fiscalYearStartMonth) });
+  const [form, setForm] = useState({ name: b.name, legalName: b.legalName ?? "", tin: b.tin ?? "", vatNo: b.vatNo ?? "", brNo: b.brNo ?? "", timezone: b.timezone, fiscalYearStartMonth: String(b.fiscalYearStartMonth), country: b.country, currency: b.currency, locale: b.locale });
+  const movedCountry = form.country !== b.country;
+  // A new country brings its own currency, timezone and financial year, which the person can still change.
+  const pickCountry = (code: string) => {
+    const c = data.countries.find((x) => x.code === code);
+    setForm((f) => (c ? { ...f, country: c.code, currency: c.currency, locale: c.locale, timezone: c.timezone, fiscalYearStartMonth: String(c.fiscalYearStartMonth) } : f));
+  };
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const field = (key: keyof typeof form, label: string) => (
     <label className="block">
@@ -307,7 +418,10 @@ function Organisation({ data }: { data: SettingsData }) {
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
-        apply([{ op: "set_business", patch: { ...form, legalName: form.legalName || undefined, tin: form.tin || undefined, vatNo: form.vatNo || undefined, brNo: form.brNo || undefined, fiscalYearStartMonth: Number(form.fiscalYearStartMonth) } }]);
+        const ops: OverlayOp[] = [{ op: "set_business", patch: { ...form, legalName: form.legalName || undefined, tin: form.tin || undefined, vatNo: form.vatNo || undefined, brNo: form.brNo || undefined, fiscalYearStartMonth: Number(form.fiscalYearStartMonth) } }];
+        // Taxes belong to a country, so a move starts them again; the new country's are set in Tax settings.
+        if (movedCountry) ops.push({ op: "set_setting", path: "tax.registered", value: [] }, { op: "set_setting", path: "tax.invoiceFormat", value: null });
+        apply(ops);
       }}
     >
       <StatusLine status={status} />
@@ -317,6 +431,26 @@ function Organisation({ data }: { data: SettingsData }) {
         {field("tin", "TIN")}
         {field("vatNo", "VAT number")}
         {field("brNo", "Business registration number")}
+        <label className="block">
+          <span className="mb-1.5 block text-sm text-ink-muted">Country</span>
+          <Select value={form.country} disabled={!data.canManage} onChange={(e) => pickCountry(e.target.value)}>
+            {data.countries.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-sm text-ink-muted">Currency</span>
+          <Select value={form.currency} disabled={!data.canManage} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
+            {data.currencies.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Select>
+        </label>
         {field("timezone", "Timezone")}
         <label className="block">
           <span className="mb-1.5 block text-sm text-ink-muted">Financial year starts</span>
@@ -328,11 +462,9 @@ function Organisation({ data }: { data: SettingsData }) {
             ))}
           </Select>
         </label>
-        <div>
-          <span className="mb-1.5 block text-sm text-ink-muted">Currency</span>
-          <p className="flex h-9 items-center text-sm">{b.currency}</p>
-        </div>
       </div>
+      {form.currency !== b.currency && <p className="text-sm text-warning-fg">Amounts already recorded aren't converted. Change the currency before you record any documents.</p>}
+      {movedCountry && <p className="text-sm text-ink-muted">Moving country switches off the current taxes. Choose the new country's taxes in Tax settings after saving.</p>}
       {data.canManage && (
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "Saving…" : "Save"}

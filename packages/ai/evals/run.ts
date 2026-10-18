@@ -7,7 +7,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { validateBlueprint, type Blueprint } from "@shapewise/blueprint";
+import { taxFlags, validateBlueprint, type Blueprint } from "@shapewise/blueprint";
 import { createLlm, designBlueprint, type BusinessProfile } from "../src";
 
 const envPath = fileURLToPath(new URL("../../../apps/web/.env.local", import.meta.url));
@@ -52,7 +52,7 @@ const CASES: Case[] = [
       { label: "production on", check: (bp) => has(bp, "production") },
       { label: "lots on", check: (bp) => ext(bp, "lots") },
       { label: "colour code tracked", check: (bp) => fieldLike(bp, /colou?r/i) },
-      { label: "VAT registered", check: (bp) => bp.settings.tax.vatRegistered },
+      { label: "VAT registered", check: (bp) => taxFlags(bp).vat },
       { label: "PO approval from 500k", check: (bp) => bp.approvals.some((a) => a.target === "purchase_order" && a.stages.some((s) => s.minAmount >= 500_000)) },
     ],
   },

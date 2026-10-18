@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TAX_CODE_KINDS } from "./catalogue/records";
 import { Label } from "./ids";
 
 /**
@@ -74,7 +75,7 @@ export const Seed = z
     units: z.array(z.object({ code: Code, name: Label })).max(60).default([]),
     /** Tax rates for the country and registrations (see jurisdiction.ts), created as tax codes. */
     taxCodes: z
-      .array(z.object({ name: Label, rate: z.number().min(0).max(100), kind: z.enum(["vat", "sscl", "wht", "exempt", "zero_rated"]) }))
+      .array(z.object({ name: Label, rate: z.number().min(0).max(100), kind: z.enum(TAX_CODE_KINDS), tax: z.string().max(24).optional() }))
       .max(20)
       .default([]),
     itemClasses: z.array(z.object({ code: Code, name: Label, parent: Code.optional() })).max(100).default([]),

@@ -7,7 +7,14 @@
  *
  * Codes: 1 assets · 2 liabilities · 3 equity · 4 income · 5 cost of sales ·
  * 6 expenses · 7 other income and expenses. Sri Lankan SME conventions.
+ *
+ * The templates are the same everywhere; the country only changes the tax
+ * accounts. Their names come from the country's taxes (GST output for
+ * Singapore, VAT output for the UK, Sales tax payable for the US), and a
+ * tax split into parts (India's CGST and SGST) adds an account per part.
+ * Sri Lanka's chart is exactly the base template.
  */
+import { countryFor, customTaxDef, taxParts, type CustomTax, type TaxDef } from "../jurisdiction";
 
 export type AccountType = "asset" | "liability" | "equity" | "income" | "expense";
 
@@ -22,6 +29,11 @@ export const SYSTEM_ROLES = [
   "grni",
   "vat_output",
   "vat_input",
+  /** India: GST within a state is split between the centre (CGST) and the state (SGST). IGST uses vat_output and vat_input. */
+  "cgst_output",
+  "cgst_input",
+  "sgst_output",
+  "sgst_input",
   "sscl_payable",
   "wht_receivable",
   "wht_payable",
@@ -63,7 +75,8 @@ export interface TemplateAccount {
   group?: boolean;
 }
 
-export type ChartTemplateKey = "lk_services" | "lk_trading" | "lk_manufacturing";
+export type ChartTemplateKey = "services" | "trading" | "manufacturing";
+export const CHART_TEMPLATE_KEYS: readonly ChartTemplateKey[] = ["trading", "manufacturing", "services"];
 
 const A = (code: string, name: string, type: AccountType, extra: Partial<TemplateAccount> = {}): TemplateAccount => ({ code, name, type, ...extra });
 const G = (code: string, name: string, type: AccountType, parent?: string): TemplateAccount => ({ code, name, type, group: true, parent });
@@ -150,13 +163,88 @@ const SERVICES: readonly TemplateAccount[] = [
 ];
 
 export const CHART_TEMPLATES: Readonly<Record<ChartTemplateKey, { label: string; accounts: readonly TemplateAccount[] }>> = {
-  lk_services: { label: "Services", accounts: sortByCode([...BASE, ...SERVICES]) },
-  lk_trading: { label: "Trading and distribution", accounts: sortByCode([...BASE, ...TRADING]) },
-  lk_manufacturing: { label: "Manufacturing", accounts: sortByCode([...BASE, ...MANUFACTURING]) },
+  services: { label: "Services", accounts: sortByCode([...BASE, ...SERVICES]) },
+  trading: { label: "Trading and distribution", accounts: sortByCode([...BASE, ...TRADING]) },
+  manufacturing: { label: "Manufacturing", accounts: sortByCode([...BASE, ...MANUFACTURING]) },
 };
 
+/** Accounts for roles only some countries use, added when the country's taxes post to them. */
+const EXTRA: Partial<Record<SystemRole, TemplateAccount>> = {
+  cgst_input: A("1241", "CGST input", "asset", { subtype: "vat_control", role: "cgst_input", parent: "1200" }),
+  sgst_input: A("1242", "SGST input", "asset", { subtype: "vat_control", role: "sgst_input", parent: "1200" }),
+  cgst_output: A("2211", "CGST output", "liability", { subtype: "vat_control", role: "cgst_output", parent: "2000" }),
+  sgst_output: A("2212", "SGST output", "liability", { subtype: "vat_control", role: "sgst_output", parent: "2000" }),
+};
+
+/** Tax account names when the country has no tax of that kind. */
+const NEUTRAL: Partial<Record<SystemRole, string>> = {
+  vat_output: "Output tax",
+  vat_input: "Input tax",
+  sscl_payable: "Levies payable",
+  wht_receivable: "Withholding tax receivable",
+  wht_payable: "Withholding tax payable",
+};
+
+const normalise = (template: string): ChartTemplateKey => template.replace(/^lk_/, "") as ChartTemplateKey;
+const charts = new Map<string, readonly TemplateAccount[]>();
+
+/**
+ * A template's accounts for a country: the base template, with the tax
+ * accounts named after the country's taxes (or the business's own), and an
+ * account for every tax part the base has no role for.
+ */
+export function chartAccounts(template: ChartTemplateKey | string, country?: string, custom: readonly CustomTax[] = []): readonly TemplateAccount[] {
+  const key = normalise(template);
+  const base = CHART_TEMPLATES[key]?.accounts ?? CHART_TEMPLATES.trading.accounts;
+  const c = country ? countryFor(country) : undefined;
+  if (!c || c.code === "LK") {
+    if (!custom.length) return base;
+  }
+  const cacheKey = `${key}|${c?.code ?? ""}|${custom.map((t) => `${t.id}:${t.kind}:${t.label}`).join(",")}`;
+  const hit = charts.get(cacheKey);
+  if (hit) return hit;
+  const taxes: TaxDef[] = [...(c?.taxes ?? []), ...custom.map(customTaxDef)];
+  const names = new Map<SystemRole, string>();
+  const name = (role: SystemRole, n: string) => names.has(role) || names.set(role, n);
+  for (const t of taxes) {
+    if (t.kind === "withholding") {
+      name("wht_receivable", `${t.short} receivable`);
+      name("wht_payable", `${t.short} payable`);
+      continue;
+    }
+    for (const p of taxParts(t)) {
+      name(p.output, t.kind === "value_added" ? `${p.label} output` : `${p.label} payable`);
+      if (p.input && t.appliesTo !== "sales") name(p.input, `${p.label} input`);
+    }
+  }
+  const lk = c?.code === "LK";
+  const out = base.map((a) => {
+    if (!a.role) return a;
+    const n = names.get(a.role) ?? (lk ? undefined : NEUTRAL[a.role]);
+    return n && n !== a.name ? { ...a, name: n } : a;
+  });
+  for (const [role, n] of names) {
+    if (out.some((a) => a.role === role)) continue;
+    const extra = EXTRA[role];
+    if (extra) out.push({ ...extra, name: n });
+  }
+  const accounts = sortByCode(out);
+  charts.set(cacheKey, accounts);
+  return accounts;
+}
+
+/** The chart a blueprint seeds and posts to. */
+export function chartOf(bp: { business: { country: string }; settings: { accounting: { chartTemplate: string }; tax: { custom: readonly CustomTax[] } } }): readonly TemplateAccount[] {
+  return chartAccounts(bp.settings.accounting.chartTemplate, bp.business.country, bp.settings.tax.custom);
+}
+
+/** The template's label, for old and new keys alike. */
+export function chartLabel(template: string): string {
+  return (CHART_TEMPLATES[normalise(template)] ?? CHART_TEMPLATES.trading).label;
+}
+
 /** Roles each kind of business needs before its engines can post. */
-export function requiredRoles(opts: { inventory: boolean; production: boolean; tax: { vat: boolean; sscl: boolean; wht: boolean } }): SystemRole[] {
+export function requiredRoles(opts: { inventory: boolean; production: boolean; taxRoles?: readonly SystemRole[] }): SystemRole[] {
   const roles: SystemRole[] = [
     "cash", "bank", "receivables", "customer_advances", "payables", "vendor_advances", "sales", "service_income", "sales_discounts",
     "bank_charges", "fx_gain_loss", "rounding", "fixed_assets", "accumulated_depreciation", "depreciation", "asset_disposal",
@@ -165,15 +253,13 @@ export function requiredRoles(opts: { inventory: boolean; production: boolean; t
   if (opts.inventory) roles.push("grni", "stock_adjustment");
   if (opts.inventory && !opts.production) roles.push("inventory");
   if (opts.production) roles.push("inventory_raw", "inventory_wip", "inventory_fg", "scrap", "production_variance", "labour_absorbed", "overhead_absorbed");
-  if (opts.tax.vat) roles.push("vat_output", "vat_input");
-  if (opts.tax.sscl) roles.push("sscl_payable");
-  if (opts.tax.wht) roles.push("wht_receivable", "wht_payable");
+  for (const r of opts.taxRoles ?? []) if (!roles.includes(r)) roles.push(r);
   return roles;
 }
 
 /** The account a role posts to in a template. */
-export function accountForRole(template: ChartTemplateKey, role: SystemRole): TemplateAccount | undefined {
-  return CHART_TEMPLATES[template].accounts.find((a) => a.role === role);
+export function accountForRole(template: ChartTemplateKey | string, role: SystemRole, country?: string, custom?: readonly CustomTax[]): TemplateAccount | undefined {
+  return chartAccounts(template, country, custom).find((a) => a.role === role);
 }
 
 function sortByCode(accounts: TemplateAccount[]): TemplateAccount[] {

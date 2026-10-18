@@ -28,7 +28,7 @@ export interface IndustryPreset {
   production?: z.input<typeof ProductionSettings>;
   /** Custom field sets from FIELD_SETS. */
   fieldSets: readonly string[];
-  chartTemplate: "lk_services" | "lk_trading" | "lk_manufacturing";
+  chartTemplate: "services" | "trading" | "manufacturing";
   seed: SeedInput;
 }
 
@@ -63,7 +63,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "lots", "ops_reports"],
     production: { useOperations: false, useOutputs: false, mixModeDefault: false },
     fieldSets: ["product_specs"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: [{ code: "RM", name: "Raw materials", kind: "raw_material" }, { code: "FG", name: "Finished goods", kind: "finished_goods" }],
@@ -89,7 +89,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "moq", "price_breaks", "pod", "supplier_qualification", "reorder_suggestions", "three_way_match", "production_purchasing", "ops_reports", "artwork", "customer_portal", "pack_units", "lots", "bins", "incoming_qc", "ncr", "capacity"],
     production: { useOperations: true, useOutputs: true, mixModeDefault: true, autoNcrOnFail: true },
     fieldSets: ["product_specs", "order_specs"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: FACTORY_WAREHOUSES,
@@ -161,7 +161,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "pack_units", "lots", "incoming_qc", "ncr", "supplier_qualification", "ops_reports"],
     production: { useOperations: true, useOutputs: false, mixModeDefault: true, coaBeforeDispatch: false },
     fieldSets: ["food_item"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: [
@@ -224,7 +224,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "pack_units", "lots", "incoming_qc", "ncr", "ops_reports"],
     production: { useOperations: true, useOutputs: false, mixModeDefault: true },
     fieldSets: ["product_specs"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: FACTORY_WAREHOUSES,
@@ -271,7 +271,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "lots", "incoming_qc", "ncr", "supplier_qualification", "ops_reports"],
     production: { useOperations: true, useOutputs: false, mixModeDefault: true, qcHoldByDefault: true, autoNcrOnFail: true, coaBeforeDispatch: true },
     fieldSets: ["product_specs"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: FACTORY_WAREHOUSES,
@@ -310,7 +310,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "pack_units", "ncr", "capacity", "ops_reports"],
     production: { useOperations: true, useOutputs: true, mixModeDefault: false },
     fieldSets: ["garment_specs"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: FACTORY_WAREHOUSES,
@@ -338,7 +338,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     extensions: ["custom_fields", "artwork", "customer_portal", "pod", "capacity", "ops_reports", "ncr"],
     production: { useOperations: true, useOutputs: true, mixModeDefault: false },
     fieldSets: ["order_specs"],
-    chartTemplate: "lk_manufacturing",
+    chartTemplate: "manufacturing",
     seed: {
       units: BASE_UNITS,
       warehouses: FACTORY_WAREHOUSES,
@@ -363,7 +363,7 @@ export const INDUSTRY_PRESETS: readonly IndustryPreset[] = [
     modules: ALL_OPERATIONS,
     extensions: ["pack_units", "lots", "bins", "pod", "price_breaks", "price_lists", "reorder_suggestions", "moq"],
     fieldSets: [],
-    chartTemplate: "lk_trading",
+    chartTemplate: "trading",
     seed: { units: BASE_UNITS, warehouses: [{ code: "MAIN", name: "Main warehouse", kind: "general" }] },
   },
 ];

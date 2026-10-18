@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { OPENING_PROMPT, availableReports, progress, type Attachment, type BusinessProfile, type InterviewPrompt, type Message, type PartialPrompt } from "@shapewise/ai/client";
+import { MAX_MESSAGE, OPENING_PROMPT, availableReports, progress, type Attachment, type BusinessProfile, type InterviewPrompt, type Message, type PartialPrompt } from "@shapewise/ai/client";
 import { REPORT_BY_KEY, REPORT_CATEGORY_LABEL, applyOps, type Blueprint, type OverlayOp } from "@shapewise/blueprint";
 import { Button, StatusPill, cx } from "@shapewise/ui";
 import { AttachmentList, Choices, Composer, Thinking, readStream, useAttachments, useStickToBottom, useTypewriter } from "@/components/ai-bits";
@@ -115,6 +115,10 @@ export function AiOnboarding({ firstName }: { firstName?: string }) {
     const message = text.trim() || (attachments.length ? "Here's what I use today." : "");
     if (!message || pending || files.busy) return;
     if (ready && /^build/i.test(message)) return startBuild();
+    if (message.length > MAX_MESSAGE) {
+      setError(`That message is ${message.length.toLocaleString("en-LK")} characters, more than the ${MAX_MESSAGE.toLocaleString("en-LK")} I can read at once. Attach it as a file instead, or paste the main points.`);
+      return;
+    }
     const answering = current?.fact;
     const before = turns;
     setDraft("");

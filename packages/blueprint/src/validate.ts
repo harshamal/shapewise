@@ -1,7 +1,8 @@
 import type { PermAction } from "./catalogue/actions";
 import { EXTENSION_BY_KEY, type ExtensionKey } from "./catalogue/extensions";
 import { MODULE_BY_KEY, SUBMODULE_BY_KEY, SUBMODULE_FOR_RECORD, SUBMODULE_NEEDS_MODULE } from "./catalogue/modules";
-import { CHART_TEMPLATES, requiredRoles } from "./catalogue/accounts";
+import { CHART_TEMPLATE_KEYS, chartAccounts, chartLabel, requiredRoles } from "./catalogue/accounts";
+import { countryFor, taxRoles, taxesOf } from "./jurisdiction";
 import { CORE_RECORDS, type CoreRecordKey } from "./catalogue/records";
 import { checkExpr, fieldExprType, type ExprType } from "./expr";
 import type { Field, FieldType } from "./fields";
@@ -394,19 +395,30 @@ export function checkBlueprint(bp: Blueprint): Issue[] {
 
   /* chart of accounts */
   const chart = bp.settings.accounting.chartTemplate;
-  const accountsByRole = new Set(CHART_TEMPLATES[chart].accounts.flatMap((a) => (a.role ? [a.role] : [])));
+  const { country } = bp.business;
+  const rolesOf = (k: string) => new Set(chartAccounts(k, country, bp.settings.tax.custom).flatMap((a) => (a.role ? [a.role] : [])));
+  const accountsByRole = rolesOf(chart);
+  const taxes = taxesOf(bp);
   const missingRoles = requiredRoles({
     inventory: r.modules.has("inventory"),
     production: r.modules.has("production"),
-    tax: { vat: bp.settings.tax.vatRegistered, sscl: bp.settings.tax.ssclRegistered, wht: bp.settings.tax.wht },
+    taxRoles: taxRoles(taxes.registered),
   }).filter((role) => !accountsByRole.has(role));
   if (missingRoles.length) {
-    const better = (Object.keys(CHART_TEMPLATES) as (keyof typeof CHART_TEMPLATES)[]).find((k) => {
-      const roles = new Set(CHART_TEMPLATES[k].accounts.flatMap((a) => (a.role ? [a.role] : [])));
+    const better = CHART_TEMPLATE_KEYS.find((k) => {
+      const roles = rolesOf(k);
       return missingRoles.every((m) => roles.has(m));
     });
-    err(["settings", "accounting", "chartTemplate"], `The ${CHART_TEMPLATES[chart].label.toLowerCase()} chart has no account for ${missingRoles.join(", ")}.${better ? ` Use "${better}".` : ""}`);
+    err(["settings", "accounting", "chartTemplate"], `The ${chartLabel(chart).toLowerCase()} chart has no account for ${missingRoles.join(", ")}.${better ? ` Use "${better}".` : ""}`);
   }
+
+  /* taxes */
+  if (!countryFor(country)) err(["business", "country"], `"${country}" isn't an ISO country code.`);
+  const known = new Set(taxes.all.map((t) => t.id));
+  bp.settings.tax.registered.forEach((id, i) => {
+    if (!known.has(id) && !["vat", "sscl", "wht"].includes(id)) err(["settings", "tax", "registered", i], `"${id}" isn't a tax of ${countryFor(country)?.name ?? country} or one of the business's own. Use one of: ${[...known].join(", ") || "(none, add your own)"}.`);
+  });
+  dupKeys(bp.settings.tax.custom.map((c) => c.id), (k, i) => err(["settings", "tax", "custom", i, "id"], `Tax "${k}" is defined twice.`));
 
   /* settings */
   dupKeys(bp.settings.general.numbering.map((n) => n.record), (k, i) => err(["settings", "general", "numbering", i, "record"], `Numbering for "${k}" is set twice.`));

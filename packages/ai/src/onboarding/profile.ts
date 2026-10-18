@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { REPORT_BY_KEY, REPORT_PLACE_LABEL, TEAM_SIZES, TURNOVER_BANDS, COUNTRY_BY_CODE, decideTax, sizeClass, type SizeClass, type TaxDecision } from "@shapewise/blueprint";
+import { COUNTRIES, REPORT_BY_KEY, REPORT_PLACE_LABEL, TEAM_SIZES, TURNOVER_KEYS, countryFor, decideTax, sizeClass, turnoverBand, type SizeClass, type TaxDecision } from "@shapewise/blueprint";
 
 /**
  * What the interview learns about a business, in the person's own terms.
@@ -7,13 +7,16 @@ import { REPORT_BY_KEY, REPORT_PLACE_LABEL, TEAM_SIZES, TURNOVER_BANDS, COUNTRY_
  *
  * Country, team size, turnover and tax registrations are facts with fixed
  * answers: the app asks them itself (no model call) and code derives the
- * size class and taxes from them.
+ * size class and taxes from them. Turnover bands and taxes are the
+ * country's own; a country without built in rules gives its own rates.
  */
 
 const nonEmpty = <T extends string>(xs: readonly T[]) => xs as unknown as [T, ...T[]];
 export const TeamSizeKey = z.enum(nonEmpty(TEAM_SIZES.map((t) => t.key)));
-export const TurnoverKey = z.enum(nonEmpty(TURNOVER_BANDS.map((t) => t.key)));
-export const TaxKey = z.enum(["vat", "sscl", "wht"]);
+export const TurnoverKey = z.enum(nonEmpty(TURNOVER_KEYS));
+/** Tax ids of every built in country, plus vat, sscl and wht, which stand for a country's value added tax, levy and withholding tax. */
+export const TaxKey = z.enum(nonEmpty([...new Set(["vat", "sscl", "wht", ...COUNTRIES.flatMap((c) => c.taxes.map((t) => t.id))])]));
+export const OwnRate = z.object({ name: z.string().trim().min(1).max(40), rate: z.number().min(0).max(100) });
 
 const list = (max: number, item = 160) => z.array(z.string().max(item)).max(max).optional();
 
@@ -23,8 +26,10 @@ export const BusinessProfile = z.object({
   country: z.string().regex(/^[A-Z]{2}$/).optional().describe("ISO country code, only if they said where they operate"),
   city: z.string().max(80).optional(),
   teamSize: TeamSizeKey.optional().describe("only if they said how many people work there"),
-  turnover: TurnoverKey.optional().describe("only if they said their yearly sales"),
-  taxRegistrations: z.array(TaxKey).max(3).optional().describe("only taxes they said they're registered for"),
+  turnover: TurnoverKey.optional().describe("only if they said their yearly sales, as the band for their country"),
+  taxRegistrations: z.array(TaxKey).max(6).optional().describe("only taxes they said they're registered for"),
+  /** Rates the business gave itself (asked by the app): its taxes where none are built in, or US sales tax per state. */
+  ownRates: z.array(OwnRate).max(10).optional(),
   /** The person answered the tax question (so an empty list means none). */
   taxConfirmed: z.boolean().optional(),
   products: list(40, 120),
@@ -55,7 +60,7 @@ export type BusinessProfile = z.infer<typeof BusinessProfile>;
 type ListKey = { [K in keyof BusinessProfile]-?: NonNullable<BusinessProfile[K]> extends string[] ? K : never }[keyof BusinessProfile];
 
 /** What one model turn may add: the same fields, plus list items to take out. */
-export const ProfileUpdate = BusinessProfile.omit({ taxConfirmed: true, reports: true, reportPlaces: true, reportsConfirmed: true }).extend({
+export const ProfileUpdate = BusinessProfile.omit({ taxConfirmed: true, ownRates: true, reports: true, reportPlaces: true, reportsConfirmed: true }).extend({
   remove: z.array(z.string().max(160)).max(20).optional().describe("list items the person said are wrong, exactly as they appear in the profile"),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdate>;
@@ -78,19 +83,19 @@ export function mergeProfile(a: BusinessProfile, b: Partial<BusinessProfile> & {
     if (k === "remove" || v === undefined || v === null || v === "") continue;
     if (Array.isArray(v)) {
       // Answers to the app's own questions replace what was there; other lists grow.
-      if (k === "taxRegistrations" || k === "reports" || k === "reportPlaces") {
+      if (k === "taxRegistrations" || k === "ownRates" || k === "reports" || k === "reportPlaces") {
         out[k] = v;
         continue;
       }
       if (!v.length) continue;
       const cur = (out[k] as string[] | undefined) ?? [];
-      out[k] = [...cur, ...v.filter((x: string) => x.trim() && !cur.some((c) => same(c, x)))];
+      out[k] = [...cur, ...(v as string[]).filter((x) => x.trim() && !cur.some((c) => same(c, x)))];
       continue;
     }
     out[k] = v;
   }
   for (const r of b.remove ?? []) {
-    for (const [k, v] of Object.entries(out)) if (Array.isArray(v) && k !== "taxRegistrations") out[k] = v.filter((x: string) => !same(x, r));
+    for (const [k, v] of Object.entries(out)) if (Array.isArray(v) && k !== "taxRegistrations" && k !== "ownRates") out[k] = v.filter((x: string) => !same(x, r));
   }
   return clamp(out);
 }
@@ -124,11 +129,24 @@ export interface Derived {
 
 /** What code concludes from the facts: size class and taxes. */
 export function derive(p: BusinessProfile): Derived {
+  // A band from another country (the person changed country) doesn't count.
+  const turnover = turnoverBand(p.turnover, p.country ?? "LK") ? p.turnover : undefined;
+  const country = countryFor(p.country);
   return {
-    size: sizeClass(p.teamSize, p.turnover),
-    countryName: p.country ? COUNTRY_BY_CODE.get(p.country)?.name : undefined,
-    tax: decideTax({ country: p.country, turnover: p.turnover, registrations: p.taxConfirmed || p.taxRegistrations?.length ? (p.taxRegistrations ?? []) : undefined, deductsWht: p.taxRegistrations?.includes("wht") }),
+    size: sizeClass(p.teamSize, turnover, p.country),
+    countryName: country?.name,
+    tax: decideTax({
+      country: p.country,
+      turnover,
+      registrations: p.taxConfirmed || p.taxRegistrations?.length ? (p.taxRegistrations ?? []) : undefined,
+      ownRates: p.ownRates,
+    }),
   };
+}
+
+/** The country's own turnover bands; none when nothing is built in for it. */
+export function bandsFor(p: BusinessProfile) {
+  return countryFor(p.country ?? "LK")?.turnoverBands ?? [];
 }
 
 /* ----------------------------------------------- sections and progress */
@@ -143,7 +161,7 @@ export interface Section {
 
 export const SECTIONS: readonly Section[] = [
   { key: "basics", label: "Basics", fields: ["businessName", "whatTheyDo", "city"], needs: ["businessName", "whatTheyDo"] },
-  { key: "size", label: "Size and tax", fields: ["country", "teamSize", "turnover", "taxRegistrations"], needs: ["country", "teamSize", "turnover", "taxConfirmed"] },
+  { key: "size", label: "Size and tax", fields: ["country", "teamSize", "turnover", "taxRegistrations", "ownRates"], needs: ["country", "teamSize", "turnover", "taxConfirmed"] },
   { key: "selling", label: "Selling", fields: ["products", "customers", "salesChannels", "paymentTerms"], needs: ["products", "customers", "salesChannels"] },
   { key: "buying", label: "Buying and stock", fields: ["suppliers", "stockPractices", "locations"], needs: ["stockPractices"] },
   { key: "making", label: "Making", fields: ["makesThings", "productionSteps", "machines", "qualityChecks"], needs: ["makesThings", "productionSteps", "qualityChecks"] },
@@ -161,6 +179,7 @@ export const FIELD_LABEL: Record<keyof BusinessProfile, string> = {
   turnover: "Yearly sales",
   taxRegistrations: "Registered for",
   taxConfirmed: "Taxes confirmed",
+  ownRates: "Tax rates",
   products: "Products",
   customers: "Customers",
   salesChannels: "How you sell",
@@ -185,8 +204,8 @@ export const FIELD_LABEL: Record<keyof BusinessProfile, string> = {
 
 const filled = (p: BusinessProfile, k: keyof BusinessProfile) => {
   const v = p[k];
-  if (k === "taxConfirmed") return Boolean(p.taxConfirmed || p.taxRegistrations?.length || (p.country && !COUNTRY_BY_CODE.get(p.country)?.taxRules));
-  if (k === "turnover" && p.country && !COUNTRY_BY_CODE.get(p.country)?.taxRules) return true;
+  if (k === "taxConfirmed") return Boolean(p.taxConfirmed || p.taxRegistrations?.length);
+  if (k === "turnover") return p.country ? !bandsFor(p).length || Boolean(turnoverBand(p.turnover, p.country)) : Boolean(p.turnover);
   return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== "";
 };
 
@@ -202,17 +221,22 @@ export function progress(p: BusinessProfile): { key: Section["key"]; label: stri
 export function displayValue(p: BusinessProfile, k: keyof BusinessProfile): string {
   const v = p[k];
   if (v === undefined) return "";
-  if (k === "country") return COUNTRY_BY_CODE.get(String(v))?.name ?? String(v);
+  if (k === "country") return countryFor(String(v))?.name ?? String(v);
   if (k === "teamSize") return TEAM_SIZES.find((t) => t.key === v)?.label ?? String(v);
-  if (k === "turnover") return TURNOVER_BANDS.find((t) => t.key === v)?.label ?? String(v);
+  if (k === "turnover") return turnoverBand(String(v))?.label ?? String(v);
+  if (k === "ownRates") return (v as { name: string; rate: number }[]).map((r) => `${r.name} ${r.rate}%`).join(", ") || "None";
   if (k === "reports") return (v as string[]).map((r) => REPORT_BY_KEY.get(r)?.label ?? r).join(", ");
   if (k === "reportPlaces") return (v as string[]).map((r) => REPORT_PLACE_LABEL[r as keyof typeof REPORT_PLACE_LABEL] ?? r).join(", ");
-  if (k === "taxRegistrations") return (v as string[]).length ? (v as string[]).map((t) => ({ vat: "VAT", sscl: "SSCL", wht: "Withholding tax" })[t] ?? t).join(", ") : "None";
+  if (k === "taxRegistrations") {
+    const taxes = countryFor(p.country ?? "LK")?.taxes ?? [];
+    const name = (t: string) => (t === "wht" ? "Withholding tax" : (taxes.find((x) => x.id === t)?.short ?? t.toUpperCase()));
+    return (v as string[]).length ? (v as string[]).map(name).join(", ") : "None";
+  }
   if (typeof v === "boolean") return v ? "Yes" : "No";
   return Array.isArray(v) ? v.join(", ") : String(v);
 }
 
 export const LIST_FIELDS = (Object.keys(BusinessProfile.shape) as (keyof BusinessProfile)[]).filter((k) => {
   const f = BusinessProfile.shape[k];
-  return f.unwrap?.() instanceof z.ZodArray && !["taxRegistrations", "reports", "reportPlaces"].includes(k);
+  return f.unwrap?.() instanceof z.ZodArray && !["taxRegistrations", "ownRates", "reports", "reportPlaces"].includes(k);
 }) as ListKey[];

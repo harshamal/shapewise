@@ -278,15 +278,15 @@ describe("access", () => {
     expect(placed.map((r) => [r.def.module, r.def.key])).toEqual(expect.arrayContaining([["sales", "sales_summary"], ["production", "production_status"]]));
   });
 
-  it("has an engine for every report that reads documents", () => {
-    const records = REPORTS.filter((r) => r.source === "records").map((r) => r.key);
+  it("has an engine for every report but budget against actual", () => {
+    const records = REPORTS.filter((r) => r.key !== "budget_vs_actual").map((r) => r.key);
     expect(Object.keys(RECORD_REPORTS).sort()).toEqual([...records].sort());
   });
 });
 
 describe("demo workspaces", () => {
   for (const [name, c] of [["demo", plastics], ["bakery", bakeryC]] as const) {
-    it(`gives ${name} real numbers on every tile and record report`, async () => {
+    it(`gives ${name} real numbers on every tile and report`, async () => {
       const store = new MemoryStore();
       await seedDemoRecords(store, name, c, today);
       const keys = reportsFor(c, "owner").map((r) => r.def.key as ReportKey);
@@ -301,6 +301,9 @@ describe("demo workspaces", () => {
       const tiles = await dashboardTiles({ store, tenant: name, compiled: c, roleKey: "owner", widgets: c.bp.dashboard, ctx });
       expect(tiles.size).toBe(c.bp.dashboard.length);
       for (const [id, t] of tiles) if (t.state === "ready" && id !== "wdg_approvals" && id !== "wdg_downtime") expect(t.value, id).not.toBeNull();
+      const tb = results.find((r) => r.key === "trial_balance");
+      expect(tb?.state === "ready" && tb.totals?.debit).toBe(tb?.state === "ready" && tb.totals?.credit);
+      expect(tb?.state === "ready" && tb.headline?.label).toBe("The books balance");
       const sales = [...tiles.values()].find((t) => t.state === "ready" && t.label.startsWith("Sales"));
       expect(sales && sales.state === "ready" && sales.value).toBeGreaterThan(0);
     });

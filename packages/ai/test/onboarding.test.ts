@@ -6,27 +6,27 @@ import { applyFact, assemble, checkDraft, contextFor, draftApproval, suggestRepo
 describe("tax rules (Sri Lanka)", () => {
   it("requires VAT and SSCL above their thresholds when nothing is confirmed", () => {
     const d = decideTax({ country: "LK", turnover: "60_250m" });
-    expect(d.settings).toEqual({ vatRegistered: true, ssclRegistered: true, wht: false, irdTaxInvoice: true });
+    expect(d.settings).toEqual({ registered: ["vat", "sscl"], custom: [], invoiceFormat: "lk_ird" });
     expect(d.taxCodes.map((t) => t.name)).toEqual(["VAT 18%", "Zero rated", "VAT exempt", "SSCL 2.5%"]);
     expect(d.reasons.join(" ")).toMatch(/Rs 60 million/);
   });
 
   it("puts SSCL on before VAT between Rs 36 and 60 million", () => {
-    expect(decideTax({ country: "LK", turnover: "36_60m" }).settings).toMatchObject({ vatRegistered: false, ssclRegistered: true });
-    expect(decideTax({ country: "LK", turnover: "15_36m" }).settings).toMatchObject({ vatRegistered: false, ssclRegistered: false });
+    expect(decideTax({ country: "LK", turnover: "36_60m" }).settings.registered).toEqual(["sscl"]);
+    expect(decideTax({ country: "LK", turnover: "15_36m" }).settings.registered).toEqual([]);
   });
 
   it("follows what the person confirmed, and warns when it doesn't match the rules", () => {
     const d = decideTax({ country: "LK", turnover: "60_250m", registrations: ["sscl"] });
-    expect(d.settings.vatRegistered).toBe(false);
+    expect(d.settings.registered).toEqual(["sscl"]);
     expect(d.warnings[0]).toMatch(/VAT threshold/);
-    expect(decideTax({ country: "LK", turnover: "lt15m", registrations: ["vat", "wht"] }).settings).toMatchObject({ vatRegistered: true, wht: true, irdTaxInvoice: true });
+    expect(decideTax({ country: "LK", turnover: "lt15m", registrations: ["vat", "wht"] }).settings).toEqual({ registered: ["vat", "wht"], custom: [], invoiceFormat: "lk_ird" });
   });
 
-  it("starts taxes off where rules aren't built in", () => {
-    const d = decideTax({ country: "AE", turnover: "gt750m" });
-    expect(Object.values(d.settings).some(Boolean)).toBe(false);
-    expect(d.reasons[0]).toMatch(/United Arab Emirates/);
+  it("starts with no taxes where rules aren't built in and the person named none", () => {
+    const d = decideTax({ country: "KE" });
+    expect(d.settings.registered).toEqual([]);
+    expect(d.reasons[0]).toMatch(/Kenya/);
   });
 
   it("classes size by the larger of people and turnover", () => {
@@ -52,9 +52,74 @@ describe("fact questions", () => {
     expect(p).toMatchObject({ country: "LK", teamSize: "11_50", turnover: "60_250m", taxRegistrations: ["vat", "sscl"], taxConfirmed: true });
   });
 
-  it("skips sales and taxes where there are no built in tax rules", () => {
-    const p = applyFact("country", "Singapore", basics).profile;
-    expect(nextFact(applyFact("teamSize", "Just me", p).profile)).toBeUndefined();
+  it("skips sales and asks for the taxes in words where there are no built in tax rules", () => {
+    let p = applyFact("country", "Kenya", basics).profile;
+    p = applyFact("teamSize", "Just me", p).profile;
+    expect(nextFact(p)).toBe("taxes");
+    const q = factPrompt("taxes", p);
+    expect(q.input.kind).toBe("text");
+    expect(q.note).toMatch(/Kenya/);
+    expect(applyFact("taxes", "none", p).profile).toMatchObject({ taxConfirmed: true, ownRates: [] });
+    expect(applyFact("taxes", "lots of them", p).problem).toMatch(/VAT 16%/);
+    p = applyFact("taxes", "VAT 16%", p).profile;
+    expect(nextFact(p)).toBeUndefined();
+    const { ctx } = contextFor(p);
+    expect(ctx.tax!.settings.custom).toEqual([{ id: "own_vat", label: "VAT", kind: "value_added", rate: 16 }]);
+    const bp = assemble(bakeryPlan, ctx).blueprint!;
+    expect(bp.business).toMatchObject({ country: "KE", currency: "KES", locale: "en-KE" });
+    expect(bp.settings.tax.registered).toEqual(["own_vat"]);
+    expect(bp.seed.taxCodes).toEqual([{ name: "VAT 16%", rate: 16, kind: "vat", tax: "own_vat" }]);
+  });
+
+  it("asks an Indian business its sales in lakh and crore and ticks GST above ₹40 lakh", () => {
+    let p = applyFact("country", "India", basics).profile;
+    p = applyFact("teamSize", "11 to 50 people", p).profile;
+    expect(nextFact(p)).toBe("turnover");
+    expect(factPrompt("turnover", p).input.options[0]).toBe("Under ₹20 lakh");
+    p = applyFact("turnover", "about 2 crore", p).profile;
+    expect(p.turnover).toBe("in_40l_10cr");
+    const q = factPrompt("taxes", p);
+    expect(q.input.options).toEqual(["GST", "TDS", "Not registered for any"]);
+    expect(q.preselected).toEqual(["GST"]);
+    expect(q.note).toContain("GST threshold (₹40 lakh)");
+    p = applyFact("taxes", "GST and TDS", p).profile;
+    expect(p.taxRegistrations).toEqual(["gst", "tds"]);
+    const bp = assemble(bakeryPlan, contextFor(p).ctx).blueprint!;
+    expect(bp.business).toMatchObject({ country: "IN", currency: "INR", fiscalYearStartMonth: 4 });
+    expect(bp.settings.tax).toEqual({ registered: ["gst", "tds"], custom: [], invoiceFormat: "in_gst" });
+    expect(bp.seed.taxCodes.map((t) => t.name)).toEqual(expect.arrayContaining(["GST 18%", "IGST 18%", "TDS on rent 10%"]));
+  });
+
+  it("warns a UK business over £90,000 that isn't VAT registered", () => {
+    let p = applyFact("country", "United Kingdom", basics).profile;
+    p = { ...p, teamSize: "2_10" };
+    p = applyFact("turnover", "£250k", p).profile;
+    expect(p.turnover).toBe("gb_90k_1m");
+    expect(factPrompt("taxes", p).preselected).toEqual(["VAT"]);
+    p = applyFact("taxes", "Not registered for any", p).profile;
+    expect(contextFor(p).ctx.tax!.warnings[0]).toMatch(/VAT threshold of £90,000/);
+  });
+
+  it("asks a US business for its sales tax rate in each state", () => {
+    let p = applyFact("country", "USA", basics).profile;
+    p = { ...p, teamSize: "2_10", turnover: "us_1_10m" };
+    p = applyFact("taxes", "Sales tax", p).profile;
+    expect(nextFact(p)).toBe("taxRates");
+    expect(factPrompt("taxRates", p).question).toMatch(/states/);
+    expect(applyFact("taxRates", "lots", p).problem).toMatch(/Texas/);
+    p = applyFact("taxRates", "Texas 8.25% and Ohio 5.75%", p).profile;
+    expect(nextFact(p)).toBeUndefined();
+    const bp = assemble(bakeryPlan, contextFor(p).ctx).blueprint!;
+    expect(bp.business).toMatchObject({ currency: "USD", timezone: "America/New_York" });
+    expect(bp.seed.taxCodes.map((t) => t.name)).toEqual(["Texas sales tax 8.25%", "Ohio sales tax 5.75%"]);
+  });
+
+  it("starts turnover and taxes again when the country changes", () => {
+    const lk: BusinessProfile = { ...basics, country: "LK", turnover: "60_250m", taxRegistrations: ["vat"], taxConfirmed: true };
+    const p = applyFact("country", "Singapore", lk).profile;
+    expect(p.country).toBe("SG");
+    expect(p.turnover).toBeUndefined();
+    expect(p.taxConfirmed).toBeUndefined();
   });
 
   it("reads typed answers, not just taps", () => {
@@ -62,7 +127,7 @@ describe("fact questions", () => {
     expect(applyFact("turnover", "around Rs 80m", basics).profile.turnover).toBe("60_250m");
     expect(applyFact("turnover", "5 crore", basics).profile.turnover).toBe("36_60m");
     expect(applyFact("taxes", "Not registered for any", basics).profile).toMatchObject({ taxRegistrations: [], taxConfirmed: true });
-    expect(applyFact("country", "Narnia", basics).problem).toMatch(/closest/);
+    expect(applyFact("country", "Narnia", basics).problem).toMatch(/couldn't find Narnia/);
   });
 
   it("ticks the taxes the rules require and says why", () => {
@@ -161,7 +226,7 @@ describe("design context", () => {
     expect(a.blueprint, JSON.stringify(a.issues)).toBeDefined();
     const bp = a.blueprint!;
     expect(bp.business).toMatchObject({ country: "LK", currency: "LKR", fiscalYearStartMonth: 4 });
-    expect(bp.settings.tax).toEqual({ vatRegistered: true, ssclRegistered: true, wht: false, irdTaxInvoice: true });
+    expect(bp.settings.tax).toEqual({ registered: ["vat", "sscl"], custom: [], invoiceFormat: "lk_ird" });
     expect(bp.settings.sales.creditLimitMode).toBe("block");
     expect(bp.settings.accounting.costCentres).toBe(true);
     expect(bp.seed.taxCodes.map((t) => t.kind)).toContain("sscl");
@@ -173,7 +238,7 @@ describe("design context", () => {
     const { ctx } = contextFor({ ...profile, country: "AU", taxRegistrations: [], taxConfirmed: true });
     const bp = assemble(bakeryPlan, ctx).blueprint!;
     expect(bp.business).toMatchObject({ country: "AU", currency: "AUD", timezone: "Australia/Sydney", fiscalYearStartMonth: 7 });
-    expect(bp.settings.tax.vatRegistered).toBe(false);
+    expect(bp.settings.tax.registered).toEqual([]);
   });
 
   it("starts AI designs with no approvals, keeping only the ones the plan states", () => {

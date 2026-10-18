@@ -145,11 +145,11 @@ describe("lifecycle actions, numbering and approvals", () => {
     expect((await get("invoice", inv))!.data.due_date).toBe("2026-10-30");
   });
 
-  it("says plainly that postings aren't made yet", async () => {
+  it("posts an invoice to the books in the same step", async () => {
     const { customer, item } = await basics();
     const inv = await okId(run({ type: "record.create", target: "invoice", data: { customer, date: "2026-10-16", lines: [{ item, quantity: 1, unit_price: 10 }] } }));
     const r = await run({ type: "record.action", target: "invoice", recordId: inv, action: "post" });
-    expect(r.status === "ok" && r.warnings[0]?.message).toMatch(/postings arrive with/);
+    expect(r).toMatchObject({ status: "ok", warnings: [], effects: { posted: { journal: [expect.any(String)], moves: 0 } } });
     expect((await get("invoice", inv))).toMatchObject({ status: "posted", number: "INV-2026-00001", data: { payment_status: "unpaid", amount_due: 1000 } });
   });
 });

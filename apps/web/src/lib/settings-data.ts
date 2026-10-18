@@ -1,7 +1,12 @@
 import "server-only";
 import {
-  CHART_TEMPLATES,
   CORE_RECORDS,
+  ISO_CURRENCIES,
+  allCountries,
+  chartLabel,
+  countryFor,
+  moneyWords,
+  TAX_KIND_LABEL,
   EXTENSIONS,
   MODULE_BY_KEY,
   SUBMODULE_BY_KEY,
@@ -25,6 +30,16 @@ export interface SettingsData {
   business: Blueprint["business"];
   settings: Settings;
   chartLabel: string;
+  /** Countries and currencies the business can choose, and its country's taxes. */
+  countries: { code: string; name: string; currency: string; locale: string; timezone: string; fiscalYearStartMonth: number }[];
+  currencies: readonly string[];
+  tax: {
+    countryName: string;
+    builtIn: boolean;
+    taxes: { id: string; label: string; hint: string }[];
+    invoiceFormats: { id: string; label: string }[];
+    kinds: [string, string][];
+  };
   extensions: {
     key: string;
     name: string;
@@ -72,7 +87,10 @@ export function settingsData(ws: Workspace): SettingsData {
     tabs: admin.map((s) => ({ key: s.key, label: s.label })),
     business: bp.business,
     settings: bp.settings,
-    chartLabel: CHART_TEMPLATES[bp.settings.accounting.chartTemplate].label,
+    chartLabel: chartLabel(bp.settings.accounting.chartTemplate),
+    countries: allCountries().map((c) => ({ code: c.code, name: c.name, currency: c.currency, locale: c.locale, timezone: c.timezone, fiscalYearStartMonth: c.fiscalYearStartMonth })),
+    currencies: ISO_CURRENCIES,
+    tax: taxChoices(bp),
     extensions: EXTENSIONS.map((e) => ({
       key: e.key,
       name: e.name,
@@ -114,6 +132,27 @@ export function settingsData(ws: Workspace): SettingsData {
       .map((t) => ({ record: t.labelPlural, pattern: t.numbering!, custom: bp.settings.general.numbering.some((n) => n.record === t.target) })),
     seed: bp.seed,
     version: bp.version,
+  };
+}
+
+/** The country's taxes as switches, each with what it is in one line. */
+function taxChoices(bp: Blueprint): SettingsData["tax"] {
+  const c = countryFor(bp.business.country);
+  const taxes = (c?.taxes ?? []).filter((t) => !t.with);
+  return {
+    countryName: c?.name ?? bp.business.country,
+    builtIn: Boolean(c?.taxRules),
+    taxes: taxes.map((t) => {
+      const parts = [
+        t.rate !== undefined ? `${t.rate}%` : "Rates you enter",
+        t.annualThreshold !== undefined && c ? `registration required above ${moneyWords(c, t.annualThreshold)} a year` : undefined,
+        t.parts && t.parts.length > 1 ? `split into ${t.parts.map((p) => p.label).join(" and ")}` : undefined,
+      ].filter(Boolean);
+      const with_ = (c?.taxes ?? []).filter((x) => x.with === t.id).map((x) => x.short);
+      return { id: t.id, label: t.kind === "withholding" ? (t.label === t.short ? t.short : `${t.label} (${t.short})`) : t.label === t.short ? `${t.short} registered` : `${t.label} (${t.short}) registered`, hint: `${parts.join(", ")}.${with_.length ? ` Comes with ${with_.join(" and ")}.` : ""}${t.note ? ` ${t.note}` : ""}` };
+    }),
+    invoiceFormats: [...(c?.invoiceFormats ?? [])],
+    kinds: Object.entries(TAX_KIND_LABEL),
   };
 }
 

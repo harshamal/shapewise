@@ -3,6 +3,7 @@ import { CommandEnvelope, type Actor, type Command, type CommandResult, type Err
 import { visibleTo, type CAction, type CField, type Compiled, type CTarget } from "./compile";
 import { checkRefs, coerceRecord, computeTotals, formatNumber, fromMinor, sequenceKey, titleOf, toMinor, type DataIssue } from "./data";
 import type { ApprovalDoc, Store, StoredRecord, WriteTx } from "./store";
+import { EngineRule, postAction } from "./engines";
 
 /**
  * The command pipeline. Every write runs here, in one transaction:
@@ -10,8 +11,8 @@ import type { ApprovalDoc, Store, StoredRecord, WriteTx } from "./store";
  *   parse → permission → validate input and references → totals →
  *   rules → approval (park and stop) → numbering → write → audit
  *
- * Ledger and stock postings (the engines) plug in at the action step; until
- * they exist, actions with money or stock effects say so in a warning.
+ * Ledger and stock postings (the engines in ./engines) run at the action
+ * step, inside the same transaction as the status change.
  */
 
 export interface PipelineDeps {
@@ -76,6 +77,7 @@ export function createExecutor(deps: PipelineDeps) {
       });
     } catch (e) {
       if (e instanceof Fail) return error(env.id, e.code, e.message, e.issues);
+      if (e instanceof EngineRule) return error(env.id, "engine_rule", e.message);
       console.error("pipeline: unexpected failure", e);
       return error(env.id, "internal", "Something went wrong saving this. Nothing was changed.");
     }
@@ -253,7 +255,22 @@ async function action(run: Run, t: CTarget, id: string, key: string, input: Reco
   if (a.effects.includes("numbering") && !next.number) await assignNumber(run, t, next);
   if (t.paymentStatus && a.to === "posted") next.data.payment_status = "unpaid";
   if (a.effects.some((e) => e === "ledger" || e === "stock")) {
-    run.warnings.push({ message: `Recorded as ${a.to.replaceAll("_", " ")}. Ledger and stock postings arrive with the accounting and inventory engines.` });
+    const posted = await postAction(
+      {
+        tx: run.tx,
+        c: run.c,
+        now: run.now,
+        today: run.today,
+        actorId: run.env.actor.id,
+        newId: run.newId,
+        warn: (message) => run.warnings.push({ message }),
+        audit: (target, recordId, action, summary) => audit(run, run.c.targets.get(target) ?? ({ target } as CTarget), recordId, action, summary),
+      },
+      t,
+      a,
+      next,
+    );
+    if (posted.journal.length || posted.moves) run.effects.posted = posted;
   }
   next.version = rec.version + 1;
   next.updatedAt = run.now.toISOString();
