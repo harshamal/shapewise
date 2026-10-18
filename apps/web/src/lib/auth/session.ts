@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { FieldValue } from "firebase-admin/firestore";
+import admin from "firebase-admin";
 import { adminAuth, adminDb } from "./admin";
 import { SESSION_COOKIE, withMembership, type TenantClaims } from "./policy";
 
@@ -65,5 +65,5 @@ export async function setMembership(uid: string, tid: string, roleKey: string | 
   await auth.setCustomUserClaims(uid, withMembership(user.customClaims, tid, roleKey));
   const ref = adminDb().doc(`tenants/${tid}/members/${uid}`);
   if (roleKey === null) await ref.delete();
-  else await ref.set({ roleKey, email: user.email ?? null, name: user.displayName ?? null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  else await ref.set({ roleKey, email: user.email ?? null, name: user.displayName ?? null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
 }

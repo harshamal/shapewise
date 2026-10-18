@@ -1,7 +1,7 @@
 import "server-only";
-import { applicationDefault, cert, getApp, getApps, initializeApp, type App } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import admin from "firebase-admin";
+import type { App } from "firebase-admin/app";
+import type { Firestore } from "firebase-admin/firestore";
 
 /**
  * firebase-admin, server only. On App Hosting it uses the service's own
@@ -9,13 +9,16 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
  * key JSON (Firebase console › Project settings › Service accounts).
  */
 export function adminApp(): App {
-  if (getApps().length) return getApp();
+  if (admin.apps.length && admin.apps[0]) return admin.apps[0];
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
   const json = process.env.FIREBASE_SERVICE_ACCOUNT;
-  return initializeApp({ projectId, credential: json ? cert(JSON.parse(json)) : applicationDefault() });
+  return admin.initializeApp({
+    projectId,
+    credential: json ? admin.credential.cert(JSON.parse(json)) : admin.credential.applicationDefault(),
+  });
 }
 
-export const adminAuth = () => getAuth(adminApp());
+export const adminAuth = () => admin.auth(adminApp());
 
 const g = globalThis as typeof globalThis & { __swDb?: Firestore };
 
@@ -26,7 +29,7 @@ const g = globalThis as typeof globalThis & { __swDb?: Firestore };
  */
 export function adminDb(): Firestore {
   if (!g.__swDb) {
-    g.__swDb = getFirestore(adminApp());
+    g.__swDb = admin.firestore(adminApp());
     g.__swDb.settings({ ignoreUndefinedProperties: true, preferRest: true });
   }
   return g.__swDb;
