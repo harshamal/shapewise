@@ -59,6 +59,13 @@ export interface AssemblyContext {
   sizeSettings?: SettingsInput;
   /** Keep the preset's approval rules (default). The AI path starts with none. */
   presetApprovals?: boolean;
+  /**
+   * Build on this live setup instead of a template: everything in it stays,
+   * the plan only adds (fields, record types, rules, views, approvals, roles,
+   * modules, features, settings). Templates, taxes and the chart of accounts
+   * are never switched on live data. Used by the change studio.
+   */
+  base?: Blueprint;
 }
 
 export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assembly {
@@ -73,15 +80,24 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
   const name = plan.businessName.trim().slice(0, 120) || "My business";
   if (name !== plan.businessName) notes.push(`Shortened the business name to "${name}".`);
   const where = ctx.country ?? COUNTRY_BY_CODE.get("LK")!;
-  let bp = presetBlueprint(plan.preset, { name, currency: where.currency, locale: where.locale, timezone: where.timezone, industry: plan.industryDescription.trim().slice(0, 80) || undefined });
-  bp.business = { ...bp.business, country: where.code, fiscalYearStartMonth: where.fiscalYearStartMonth };
+  const base = ctx.base;
+  let bp: BlueprintInput = base
+    ? (structuredClone(base) as BlueprintInput)
+    : presetBlueprint(plan.preset, { name, currency: where.currency, locale: where.locale, timezone: where.timezone, industry: plan.industryDescription.trim().slice(0, 80) || undefined });
+  if (!base) bp.business = { ...bp.business, country: where.code, fiscalYearStartMonth: where.fiscalYearStartMonth };
+  else {
+    // Every id already in use stays reserved, so nothing new collides with it.
+    for (const e of base.entities) (ids.reserve(e.id), e.fields.forEach((f) => ids.reserve(f.id)), e.workflow?.states.forEach((x) => ids.reserve(x.id)), e.workflow?.transitions.forEach((x) => ids.reserve(x.id)));
+    for (const r of base.rules) ids.reserve(r.id);
+    for (const w of base.dashboard) ids.reserve(w.id);
+  }
   for (const r of bp.roles) ids.reserve(r.id);
   for (const a of bp.approvals ?? []) (ids.reserve(a.id), a.stages.forEach((s) => ids.reserve(s.id)));
   for (const v of bp.views ?? []) ids.reserve(v.id);
   for (const c of bp.customFields ?? []) ids.reserve(c.field.id);
 
   /* 2. modules and hidden screens */
-  const on = new Set<string>([...[...MODULE_BY_KEY.values()].filter((m) => m.core).map((m) => m.key), ...plan.modules]);
+  const on = new Set<string>([...[...MODULE_BY_KEY.values()].filter((m) => m.core).map((m) => m.key), ...(base ? base.modules.filter((m) => m.enabled).map((m) => m.key) : []), ...plan.modules]);
   // A business registered for a tax needs the tax screens (returns, rates, certificates).
   const taxes = ctx.tax ? businessTaxes(where.code, ctx.tax.settings) : undefined;
   if (taxes?.registered.length && !on.has("tax")) {
@@ -89,12 +105,13 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
     const names = taxes.registered.filter((t) => !t.with).map((t) => (t.id === "wht" ? "withholding tax" : t.short));
     notes.push(`Switched on Tax for your ${names.join(" and ")} returns.`);
   }
-  bp.modules = [...on].map((key) => ({ key, enabled: true }));
+  // On a live setup, modules keep their screen settings; new ones are added.
+  bp.modules = base ? [...(bp.modules ?? []).map((m) => (on.has(m.key) ? { ...m, enabled: true } : m)), ...[...on].filter((k) => !(bp.modules ?? []).some((m) => m.key === k)).map((key) => ({ key, enabled: true }))] : [...on].map((key) => ({ key, enabled: true }));
   const hide = plan.hideSubmodules.filter((k) => on.has(SUBMODULE_BY_KEY.get(k)?.module ?? ""));
   bp = withoutSubmodules(bp, hide);
 
   /* 3. extensions, with their requirements, limited to modules that are on */
-  const wanted = withRequirements(plan.extensions);
+  const wanted = withRequirements([...(base ? base.extensions : []), ...plan.extensions]);
   const dropped = wanted.filter((k) => !EXTENSION_BY_KEY[k].needsModules.every((m) => on.has(m)));
   dropped.forEach((k) => notes.push(`Left out "${EXTENSION_BY_KEY[k].name}": it needs the ${EXTENSION_BY_KEY[k].needsModules.filter((m) => !on.has(m)).map((m) => MODULE_BY_KEY.get(m)?.label ?? m).join(" and ")} module.`));
   const extensions = new Set<ExtensionKey>(wanted.filter((k) => !dropped.includes(k)));
@@ -114,15 +131,23 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
     (bp.seed ??= {}).taxCodes = ctx.tax.taxCodes;
   }
   // The chart of accounts follows the modules: production needs WIP and scrap accounts, stock needs inventory accounts.
+  // A live setup keeps its chart: switching it would orphan the books.
   const accounting = (s.accounting ??= {}) as { chartTemplate?: string };
+  if (!base) {
   const chart = (accounting.chartTemplate ?? "trading").replace(/^lk_/, "");
   const neededChart = on.has("production") ? "manufacturing" : on.has("inventory") && chart === "services" ? "trading" : chart;
   if (neededChart !== chart) notes.push(`Using the ${neededChart} chart of accounts to match the modules.`);
   accounting.chartTemplate = neededChart;
+  }
 
   /* 5. record types first, so everything else can reference them */
   const recordIds = new Map<string, string>();
-  plan.recordTypes.forEach((rt) => recordIds.set(rt.key, ids.make("ent", rt.key)));
+  // Record types already in a live setup can be referred to by key.
+  for (const e of base?.entities ?? []) recordIds.set(e.key, e.id);
+  plan.recordTypes.forEach((rt, i) => {
+    if (recordIds.has(rt.key)) return issues.push({ planPath: ["recordTypes", i, "key"], message: `There's already a record type called "${rt.key}". Use another key, or add fields to it instead.` }), undefined;
+    recordIds.set(rt.key, ids.make("ent", rt.key));
+  });
   const resolveRecord = (key: string, path: Path): string | undefined => {
     if (key in CORE_RECORDS) return key;
     const id = recordIds.get(key);
@@ -170,7 +195,7 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
   bp.customFields = custom;
 
   /* 7. custom record types */
-  bp.entities = plan.recordTypes.map((rt, i) => {
+  const built = plan.recordTypes.map((rt, i) => {
     origin.set(`entities.${i}`, ["recordTypes", i]);
     const fields = rt.fields.map((f, j) => toField(f, `${rt.key}_${f.key}`, ["recordTypes", i, "fields", j]));
     const fieldId = (key: string, path: Path) => {
@@ -213,6 +238,11 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
       numbering: rt.numberingPrefix ? { pattern: `${rt.numberingPrefix}-{seq:4}` } : undefined,
     };
   });
+
+  // On a live setup, new record types join the ones already there (a key that's taken was reported above).
+  const kept = base ? built.filter((e) => !base.entities.some((x) => x.id === e.id)) : built;
+  bp.entities = [...(base?.entities ?? []), ...kept];
+  if (base?.entities.length) shiftOrigins(origin, "entities", base.entities.length);
 
   /* 8. roles: replace by key, or add */
   const roles = [...bp.roles];
@@ -299,6 +329,10 @@ export function assemble(plan: BlueprintPlan, ctx: AssemblyContext = {}): Assemb
   });
   // origin indexes for rules must follow the emitted order
   remapOrigins(origin, "rules", bp.rules.length);
+  if (base?.rules.length) {
+    bp.rules = [...base.rules, ...bp.rules];
+    shiftOrigins(origin, "rules", base.rules.length);
+  }
 
   /* 11. views */
   const views = [...(bp.views ?? [])];
@@ -407,6 +441,16 @@ function toPlanPath(origin: Map<string, Path>, path: Issue["path"]): Path {
     if (hit) return [...hit];
   }
   return [];
+}
+
+/** Elements added after a live setup's own ones sit further down the list; their origins move with them. */
+function shiftOrigins(origin: Map<string, Path>, prefix: string, by: number) {
+  const moved = [...origin.entries()].filter(([k]) => k.startsWith(`${prefix}.`));
+  moved.forEach(([k]) => origin.delete(k));
+  for (const [k, v] of moved) {
+    const [, idx, ...rest] = k.split(".");
+    origin.set([prefix, Number(idx) + by, ...rest].join("."), v);
+  }
 }
 
 /** Rules are emitted with flatMap, so re-key their origins by emitted position. */

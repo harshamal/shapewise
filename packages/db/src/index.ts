@@ -4,3 +4,5 @@ export * from "./indexes";
 export * from "./firestore-store";
 export * from "./tenants";
 export * from "./workspace-id";
+export * from "./members";
+export * from "./changes";

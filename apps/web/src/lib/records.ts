@@ -64,7 +64,7 @@ export async function refOptions(ws: Workspace, t: CTarget) {
 }
 
 /** Titles for every record referenced by these records, for display. */
-export async function refTitles(ws: Workspace, t: CTarget, recs: StoredRecord[]): Promise<RefTitles> {
+export async function refTitles(ws: Pick<Workspace, "store" | "tenant" | "compiled">, t: CTarget, recs: StoredRecord[]): Promise<RefTitles> {
   const titles: RefTitles = {};
   const fields = [...t.fields, ...(t.lines?.fields ?? []), ...t.children.flatMap((c) => c.fields)].filter((f) => f.type === "ref" && f.to && f.to !== "user");
   await ws.store.read(ws.tenant, async (tx) => {

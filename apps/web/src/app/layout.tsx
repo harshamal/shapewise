@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${sinhala.variable} ${tamil.variable}`}>
-      <body className="min-h-dvh">{children}</body>
+      <body className="min-h-dvh max-w-full overflow-x-hidden">{children}</body>
     </html>
   );
 }

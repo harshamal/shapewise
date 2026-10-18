@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { titleOf, type CList } from "@shapewise/runtime";
 import { StatusPill, type Tone } from "@shapewise/ui";
+import { DocumentButtons } from "@/components/document-buttons";
 import { RecordActions } from "@/components/record-actions";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { formatValue, isNumeric, type RefTitles } from "@/lib/format";
@@ -72,6 +73,7 @@ export default async function RecordDetail({
             canDelete={can.remove}
             listHref={here}
           />
+          {t.printable && <DocumentButtons tenant={tenant} target={t.target} id={rec.id} label={t.label} />}
         </header>
 
         <section aria-label="Details" className="rounded-sw border bg-surface">

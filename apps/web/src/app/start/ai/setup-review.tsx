@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cx } from "@shapewise/ui";
 import type { ArcFlow, FlowGraph, ModuleSummary } from "@/lib/blueprint-summary";
 
@@ -186,9 +186,25 @@ const VIEWS: { key: View; label: string; hint: string }[] = [
  */
 export function FlowMap({ graph }: { graph: FlowGraph }) {
   const [view, setView] = useState<View>("documents");
+  const [fullscreen, setFullscreen] = useState(false);
   const hint = VIEWS.find((v) => v.key === view)!.hint;
-  return (
-    <div className="space-y-3">
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [fullscreen]);
+
+  const viewControls = (isFs: boolean) => (
+    <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-full border bg-surface p-0.5" role="tablist" aria-label="View">
           {VIEWS.map((v) => (
@@ -206,13 +222,70 @@ export function FlowMap({ graph }: { graph: FlowGraph }) {
         </div>
         <p className="text-xs text-ink-muted">{hint}</p>
       </div>
-      <div key={view} className="animate-fade">
-        {view === "documents" && <DocumentMap graph={graph} />}
-        {view === "stock" && <ArcDiagram flow={graph.stock} tone="stock" empty="Nothing in this setup moves stock." withinLabel="Within" />}
-        {view === "money" && <ArcDiagram flow={graph.money} tone="money" empty="Nothing in this setup posts to the accounts yet." withinLabel="Between its own accounts" />}
-      </div>
-      <Effects effects={graph.effects} />
+
+      <button
+        type="button"
+        onClick={() => setFullscreen((fs) => !fs)}
+        className="inline-flex items-center gap-1.5 rounded-full border bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-sunken"
+        title={isFs ? "Exit fullscreen (Esc)" : "Expand to fullscreen"}
+      >
+        {isFs ? (
+          <>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" />
+            </svg>
+            <span>Exit fullscreen</span>
+            <kbd className="ml-1 text-[10px] text-ink-muted">Esc</kbd>
+          </>
+        ) : (
+          <>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+            <span>Expand fullscreen</span>
+          </>
+        )}
+      </button>
     </div>
+  );
+
+  const diagramContent = (
+    <div key={view} className="animate-fade">
+      {view === "documents" && <DocumentMap graph={graph} />}
+      {view === "stock" && <ArcDiagram flow={graph.stock} tone="stock" empty="Nothing in this setup moves stock." withinLabel="Within" />}
+      {view === "money" && <ArcDiagram flow={graph.money} tone="money" empty="Nothing in this setup posts to the accounts yet." withinLabel="Between its own accounts" />}
+    </div>
+  );
+
+  return (
+    <>
+      <div className="space-y-3">
+        {viewControls(false)}
+        {diagramContent}
+        <Effects effects={graph.effects} />
+      </div>
+
+      {fullscreen && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-canvas/98 p-4 sm:p-6 backdrop-blur-md animate-fade"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fullscreen flow diagram"
+        >
+          <div className="mb-4 flex shrink-0 items-center justify-between border-b pb-3">
+            <div>
+              <h2 className="text-lg font-medium text-ink">How it connects</h2>
+              <p className="text-xs text-ink-muted">How each document leads to the next. Hover one to trace its path.</p>
+            </div>
+            {viewControls(true)}
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto rounded-2xl border bg-surface p-4 sm:p-6 shadow-overlay space-y-6">
+            {diagramContent}
+            <Effects effects={graph.effects} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

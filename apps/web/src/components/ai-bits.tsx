@@ -14,7 +14,7 @@ export async function readStream(res: Response, onEvent: (e: Record<string, unkn
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
-  for (;;) {
+  for (; ;) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += value;

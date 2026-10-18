@@ -5,6 +5,7 @@
  *
  * tenants/{tid}                       name, currency, locale, timezone, activeBlueprintVersion
  *   members/{uid}                     roleKey
+ *   invites/{sha256(token)}           email, roleKey, status, expiresAt (server only)
  *   blueprints/{version}              immutable blueprint body + compiled metadata
  *   records/{rid}                     entityKey, data, idx, status, version, links[], searchTokens[], embedding
  *   accounts/{aid}                    chart of accounts
@@ -23,6 +24,7 @@
 
 export const TENANT_COLLECTIONS = [
   "members",
+  "invites",
   "blueprints",
   "records",
   "accounts",

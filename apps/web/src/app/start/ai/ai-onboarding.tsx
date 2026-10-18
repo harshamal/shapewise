@@ -621,7 +621,7 @@ function Review({
     change(ops);
   };
   return (
-    <main className="mx-auto w-full max-w-[1280px] px-4 py-10 sm:px-6 lg:px-8">
+    <main className="mx-auto w-full max-w-[1480px] px-4 py-10 sm:px-6 lg:px-8">
       <button type="button" onClick={onBack} className="text-sm text-ink-muted transition-colors hover:text-ink">
         ← Back to the conversation
       </button>

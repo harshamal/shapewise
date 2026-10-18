@@ -99,6 +99,22 @@ export const loadWorkspace = cache(async (tenant: string) => {
 
 export type Workspace = Awaited<ReturnType<typeof loadWorkspace>>;
 
+/**
+ * A workspace's setup and records without anyone signed in, for shared
+ * document links (the link's signature is the permission). Null if missing.
+ */
+export async function tenantData(tenant: string): Promise<{ tenant: string; bp: Blueprint; compiled: Compiled; store: Store } | null> {
+  if (isDemo(tenant)) {
+    const bp = demoBlueprint(tenant as keyof typeof DEMOS);
+    const compiled = compile(bp);
+    await withDemoData(tenant, compiled);
+    return { tenant, bp, compiled, store: memoryStore };
+  }
+  const loaded = await loadBlueprint(adminDb(), tenant).catch(() => null);
+  if (!loaded) return null;
+  return { tenant, bp: loaded.bp, compiled: compile(loaded.bp), store: firestoreStore() };
+}
+
 /** What every page hands the workspace frame. */
 export function shellProps(ws: Workspace) {
   return { base: ws.base, workspaceName: ws.bp.business.name, viewer: ws.viewer, sections: ws.sections.filter((s) => s.key !== "admin"), settings: settingsData(ws) };

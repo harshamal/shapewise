@@ -10,6 +10,7 @@ import { WorkspaceShell } from "@/components/workspace-shell";
 import { formatValue, isNumeric } from "@/lib/format";
 import { canCreate, listRecords, refTitles, targetFor } from "@/lib/records";
 import { ANALYTICS_MODULE, asPeriod, reportsHref, runFor, visibleReports } from "@/lib/reports";
+import { ChangeStudio } from "@/components/change-studio";
 import { loadWorkspace, shellProps, type Workspace } from "@/lib/workspace";
 
 const MAX_COLUMNS = 6;
@@ -48,6 +49,8 @@ export default async function SubmodulePage({
         <RecordList ws={ws} t={t} here={here} />
       ) : submodule === "approvals" ? (
         <ApprovalsInbox ws={ws} />
+      ) : submodule === "change_studio" ? (
+        <ChangeStudio tenant={tenant} />
       ) : submodule === "audit_log" ? (
         <AuditLog ws={ws} />
       ) : nav.kind === "report" && (submodule === "reports" || ANALYTICS_MODULE[submodule]) ? (

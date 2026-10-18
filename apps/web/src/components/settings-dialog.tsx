@@ -3,11 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import type { OverlayOp } from "@shapewise/blueprint";
-import { Button, Input, Select, StatusPill, cx } from "@shapewise/ui";
+import { Button, Input, Select, StatusPill, Textarea, cx } from "@shapewise/ui";
 import { changeSettings } from "@/app/w/[tenant]/actions";
 import type { SettingsData } from "@/lib/settings-data";
 import { ApprovalRules } from "./approval-rules";
 import { RoleMatrix } from "./role-matrix";
+import { TeamPanel } from "./team-panel";
 
 /**
  * Settings as a popup, like SyncBooks: sections on the left (searchable),
@@ -399,7 +400,7 @@ function Switch({ label, checked, disabled, onChange }: { label: string; checked
 function Organisation({ data }: { data: SettingsData }) {
   const { apply, pending, status } = useApply(data.tenant);
   const b = data.business;
-  const [form, setForm] = useState({ name: b.name, legalName: b.legalName ?? "", tin: b.tin ?? "", vatNo: b.vatNo ?? "", brNo: b.brNo ?? "", timezone: b.timezone, fiscalYearStartMonth: String(b.fiscalYearStartMonth), country: b.country, currency: b.currency, locale: b.locale });
+  const [form, setForm] = useState({ name: b.name, legalName: b.legalName ?? "", tin: b.tin ?? "", vatNo: b.vatNo ?? "", brNo: b.brNo ?? "", address: b.address ?? "", phone: b.phone ?? "", email: b.email ?? "", website: b.website ?? "", timezone: b.timezone, fiscalYearStartMonth: String(b.fiscalYearStartMonth), country: b.country, currency: b.currency, locale: b.locale });
   const movedCountry = form.country !== b.country;
   // A new country brings its own currency, timezone and financial year, which the person can still change.
   const pickCountry = (code: string) => {
@@ -418,7 +419,7 @@ function Organisation({ data }: { data: SettingsData }) {
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
-        const ops: OverlayOp[] = [{ op: "set_business", patch: { ...form, legalName: form.legalName || undefined, tin: form.tin || undefined, vatNo: form.vatNo || undefined, brNo: form.brNo || undefined, fiscalYearStartMonth: Number(form.fiscalYearStartMonth) } }];
+        const ops: OverlayOp[] = [{ op: "set_business", patch: { ...form, legalName: form.legalName || undefined, tin: form.tin || undefined, vatNo: form.vatNo || undefined, brNo: form.brNo || undefined, address: form.address || undefined, phone: form.phone || undefined, email: form.email || undefined, website: form.website || undefined, fiscalYearStartMonth: Number(form.fiscalYearStartMonth) } }];
         // Taxes belong to a country, so a move starts them again; the new country's are set in Tax settings.
         if (movedCountry) ops.push({ op: "set_setting", path: "tax.registered", value: [] }, { op: "set_setting", path: "tax.invoiceFormat", value: null });
         apply(ops);
@@ -431,6 +432,14 @@ function Organisation({ data }: { data: SettingsData }) {
         {field("tin", "TIN")}
         {field("vatNo", "VAT number")}
         {field("brNo", "Business registration number")}
+        {field("phone", "Phone")}
+        {field("email", "Email")}
+        {field("website", "Website")}
+        <label className="block sm:col-span-2">
+          <span className="mb-1.5 block text-sm text-ink-muted">Address</span>
+          <Textarea rows={2} value={form.address} disabled={!data.canManage} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+          <span className="mt-1 block text-xs text-ink-faint">Printed at the top of invoices, quotes and receipts, with your phone, email and tax numbers.</span>
+        </label>
         <label className="block">
           <span className="mb-1.5 block text-sm text-ink-muted">Country</span>
           <Select value={form.country} disabled={!data.canManage} onChange={(e) => pickCountry(e.target.value)}>
@@ -475,13 +484,7 @@ function Organisation({ data }: { data: SettingsData }) {
 }
 
 function Users({ data }: { data: SettingsData }) {
-  return (
-    <div className="space-y-4 text-sm">
-      <p className="text-ink-muted">People sign in with Google. Each person has one role in this workspace, which decides what they can see and do.</p>
-      <Table head={["Role", "What it's for"]} rows={data.roles.map((r) => [r.label, r.owner ? "Full access, approvals and system changes" : (r.description ?? "")])} />
-      <p className="text-ink-muted">Inviting people arrives with workspace sign-up.</p>
-    </div>
-  );
+  return <TeamPanel tenant={data.tenant} />;
 }
 
 function Roles({ data }: { data: SettingsData }) {

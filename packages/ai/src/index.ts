@@ -15,3 +15,4 @@ export * from "./assistant/run";
 export * from "./partial-json";
 export * from "./governance/approval";
 export * from "./onboarding/analytics";
+export * from "./governance/change";

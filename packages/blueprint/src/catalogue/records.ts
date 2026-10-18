@@ -227,7 +227,7 @@ const RAW_RECORDS: Record<CoreRecordKey, CoreRecord> = {
     key: "customer", label: "Customer", labelPlural: "Customers",
     fields: [
       f("name", "Name", "text", { indexed: true }), f("legal_name", "Legal name", "text"), f("tin", "TIN", "text"), f("vat_no", "VAT number", "text"),
-      f("email", "Email", "email"), f("phone", "Phone", "phone", { indexed: true }), f("payment_terms_days", "Payment terms (days)", "integer"),
+      f("email", "Email", "email"), f("phone", "Phone", "phone", { indexed: true }), f("address", "Address", "longtext"), f("payment_terms_days", "Payment terms (days)", "integer"),
       f("credit_limit", "Credit limit", "money"), ref("price_list", "Price list", "price_list"), ref("salesperson", "Salesperson", "salesperson"),
       f("balance", "Balance", "money", { system: true, indexed: true }),
       f("order_count", "Orders", "integer", { system: true }), f("days_overdue", "Days overdue", "integer", { system: true }),
@@ -238,7 +238,7 @@ const RAW_RECORDS: Record<CoreRecordKey, CoreRecord> = {
     key: "vendor", label: "Vendor", labelPlural: "Vendors",
     fields: [
       f("name", "Name", "text", { indexed: true }), f("legal_name", "Legal name", "text"), f("tin", "TIN", "text"), f("vat_no", "VAT number", "text"),
-      f("email", "Email", "email"), f("phone", "Phone", "phone"), f("payment_terms_days", "Payment terms (days)", "integer"),
+      f("email", "Email", "email"), f("phone", "Phone", "phone"), f("address", "Address", "longtext"), f("payment_terms_days", "Payment terms (days)", "integer"),
       f("approval_status", "Supplier status", "select", { options: ["approved", "conditional", "blocked"], indexed: true }),
       f("balance", "Balance", "money", { system: true, indexed: true }),
     ],

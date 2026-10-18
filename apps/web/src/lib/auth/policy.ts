@@ -80,3 +80,12 @@ export function sameOrigin(headers: Headers): boolean {
     return false;
   }
 }
+
+export function normaliseEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function normaliseUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
