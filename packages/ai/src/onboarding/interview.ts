@@ -423,7 +423,22 @@ function systemFor(p: BusinessProfile): string {
     p.taxConfirmed || p.taxRegistrations?.length ? `Taxes: ${d.tax.reasons.join(" ")}` : undefined,
   ].filter(Boolean);
   const gaps = profileGaps(p);
-  return `${SYSTEM}\n\nProfile so far (JSON): ${JSON.stringify(p)}\n${facts.length ? `Known from the app: ${facts.join(" ")}\n` : ""}Still unknown: ${gaps.length ? gaps.join(", ") : "nothing important"}.`;
+  const needed = buildGaps(p);
+  const readiness = needed.length
+    ? `\nNot enough to build yet. Still needed before you may wrap up: ${needed.join(", ")}. Don't use wrap_up, set enoughToDesign or say the setup is ready; ask for these next.`
+    : "";
+  return `${SYSTEM}\n\nProfile so far (JSON): ${JSON.stringify(p)}\n${facts.length ? `Known from the app: ${facts.join(" ")}\n` : ""}Still unknown: ${gaps.length ? gaps.join(", ") : "nothing important"}.${readiness}`;
+}
+
+/** What profileReady still needs that the model asks for (the app asks country and team size itself). */
+function buildGaps(p: BusinessProfile): string[] {
+  const gaps: string[] = [];
+  if (!p.businessName) gaps.push("business name");
+  if (!p.whatTheyDo) gaps.push("what they do");
+  if (!p.products?.length) gaps.push("products or services");
+  if (!p.customers?.length) gaps.push("who buys");
+  if (p.makesThings === undefined) gaps.push("whether they make what they sell");
+  return gaps;
 }
 
 function toPrompt(v: InterviewTurn): InterviewPrompt {
@@ -467,9 +482,9 @@ export async function interviewTurn(llm: Llm, state: InterviewState, input: Inte
 async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile, leadNote: string | undefined, onPartial?: (p: PartialPrompt) => void): Promise<InterviewResult> {
   // If code may ask a fact next, the model's question could be held back, so only its note is streamed.
   const factsPending = nextFact({ ...profile, businessName: profile.businessName ?? "x", whatTheyDo: profile.whatTheyDo ?? "x" }) !== undefined;
-  const { value, usage } = await llm.json({
+  const ask = (system: string) => llm.json({
     tier: "chat",
-    system: systemFor(profile),
+    system,
     messages: history,
     schema: InterviewTurn,
     temperature: 0.4,
@@ -480,9 +495,16 @@ async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile,
         }
       : undefined,
   });
-  const merged = mergeProfile(profile, value.profile);
+  let { value, usage } = await ask(systemFor(profile));
+  let merged = mergeProfile(profile, value.profile);
+  const usages = [usage];
+  // Wrapped up too early: tell the model what's still missing and let it ask, once.
+  if (value.topic === "wrap_up" && !profileReady(merged)) {
+    ({ value, usage } = await ask(`${systemFor(merged)}\nYour last reply tried to wrap up, but the setup can't be built yet. Say briefly what's still needed and ask for it.`));
+    merged = mergeProfile(merged, value.profile);
+    usages.push(usage);
+  }
   let prompt = toPrompt(value);
-  // The model may try to wrap up before the profile can be designed from; ask for what's missing instead.
   if (prompt.topic === "wrap_up" && !profileReady(merged)) prompt = missingPrompt(merged, prompt.note);
   if (leadNote) prompt = { ...prompt, note: [leadNote, prompt.note].filter(Boolean).join(" ") };
   const fact = nextFact(merged);
@@ -494,12 +516,12 @@ async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile,
     prompt: shown,
     // Code, not the model, has the final say on readiness.
     ready: !fact && value.enoughToDesign && profileReady(merged),
-    usage: [usage],
+    usage: usages,
     instant: false,
   };
 }
 
-/** A question for the first thing profileReady still needs, used when the model wraps up too early. */
+/** Last resort when the model still wraps up early: a plain question for the first thing profileReady needs. */
 function missingPrompt(p: BusinessProfile, note: string): InterviewPrompt {
   const ask = (topic: Topic, question: string, input: AnswerInput): InterviewPrompt => ({ note, question, topic, section: TOPIC_SECTION[topic], topicLabel: TOPIC_LABEL[topic], input });
   const text = (placeholder: string): AnswerInput => ({ kind: "text", options: [], placeholder });
