@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MAX_MESSAGE, OPENING_PROMPT, availableReports, progress, type Attachment, type BusinessProfile, type InterviewPrompt, type Message, type PartialPrompt } from "@shapewise/ai/client";
+import { MAX_MESSAGE, OPENING_PROMPT, availableReports, profileReady, progress, type Attachment, type BusinessProfile, type InterviewPrompt, type Message, type PartialPrompt } from "@shapewise/ai/client";
 import { REPORT_BY_KEY, REPORT_CATEGORY_LABEL, applyOps, type Blueprint, type OverlayOp } from "@shapewise/blueprint";
 import { Button, StatusPill, cx } from "@shapewise/ui";
 import { AttachmentList, Choices, Composer, Thinking, readStream, useAttachments, useStickToBottom, useTypewriter } from "@/components/ai-bits";
@@ -232,7 +232,7 @@ export function AiOnboarding({ firstName }: { firstName?: string }) {
       </>
     );
 
-  const canBuild = !pending && Boolean(profile.businessName && profile.whatTheyDo && profile.products?.length);
+  const canBuild = !pending && profileReady(profile);
   const offerBuild = ready && !pending;
 
   /* ------------------------------------------------ empty: centred start */
@@ -476,7 +476,7 @@ function BuildCard({ ready, canBuild, onBuild }: { ready: boolean; canBuild: boo
     <div className={cx("rounded-2xl border p-4 transition-colors duration-500", ready ? "border-accent/50 bg-accent-soft" : "bg-surface")}>
       <p className="text-sm font-medium">{ready ? "Ready to build" : "Build when you're ready"}</p>
       <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-        {ready ? "I have enough for a strong first setup. You'll review it before anything is created." : "A few more answers make it fit better, but you can build at any point."}
+        {ready ? "I have enough for a strong first setup. You'll review it before anything is created." : canBuild ? "A few more answers make it fit better, but you can build at any point." : "Answer a few basics first: what you sell, who buys and whether you make it."}
       </p>
       <Button variant={ready ? "primary" : "secondary"} className="mt-3 w-full" onClick={onBuild} disabled={!canBuild}>
         Build my setup

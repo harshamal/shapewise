@@ -482,6 +482,8 @@ async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile,
   });
   const merged = mergeProfile(profile, value.profile);
   let prompt = toPrompt(value);
+  // The model may try to wrap up before the profile can be designed from; ask for what's missing instead.
+  if (prompt.topic === "wrap_up" && !profileReady(merged)) prompt = missingPrompt(merged, prompt.note);
   if (leadNote) prompt = { ...prompt, note: [leadNote, prompt.note].filter(Boolean).join(" ") };
   const fact = nextFact(merged);
   const shown = fact ? factPrompt(fact, merged, prompt.note) : prompt;
@@ -495,6 +497,18 @@ async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile,
     usage: [usage],
     instant: false,
   };
+}
+
+/** A question for the first thing profileReady still needs, used when the model wraps up too early. */
+function missingPrompt(p: BusinessProfile, note: string): InterviewPrompt {
+  const ask = (topic: Topic, question: string, input: AnswerInput): InterviewPrompt => ({ note, question, topic, section: TOPIC_SECTION[topic], topicLabel: TOPIC_LABEL[topic], input });
+  const text = (placeholder: string): AnswerInput => ({ kind: "text", options: [], placeholder });
+  if (!p.businessName) return ask("business", "What's the business called?", text("e.g. Harbour Bakes"));
+  if (!p.whatTheyDo) return ask("business", "In a sentence, what does the business do?", text("e.g. We make bread and cakes for cafés around town"));
+  if (!p.products?.length) return ask("products", "What are the main products or services you sell?", text("e.g. Bread, birthday cakes, pastries"));
+  if (!p.customers?.length) return ask("customers", "Who buys from you?", text("e.g. Cafés, hotels and walk-in customers"));
+  if (p.makesThings === undefined) return ask("production", "Do you make or assemble what you sell?", { kind: "confirm", options: ["Yes, we make it", "No, we buy and sell"], placeholder: "" });
+  return ask("business", "A couple of details are still missing. Anything else about the business?", text("e.g. We have one shop and five staff"));
 }
 
 export const OPENING_PROMPT: InterviewPrompt = {
