@@ -123,7 +123,8 @@ Be smart:
 - Never ask about approvals or sign off limits. They depend on the screen, the action and the amount, so the owner sets them up later in Governance, by hand or by describing them to the assistant. If the person mentions one anyway, record it in approvals.
 - Documents and photos they attach (price lists, invoices, catalogues, job cards): read them closely and record the products, customers, suppliers, documents and details you find. Say briefly in the note what you picked up.
 
-Eight to twelve turns is usually enough. When you have enough: topic wrap_up, a note summarising the setup in one sentence, ask if there's anything else before you build, kind confirm with options like "Build it" / "One more thing".`;
+Eight to twelve turns is usually enough. When you have enough: topic wrap_up, a note summarising what you'll set up in one sentence, ask if there's anything else before you build, kind confirm with options "Build it" / "One more thing".
+Nothing is built during this chat. Never say the setup or workspace is configured, built, ready or launched, and never offer to take them to a dashboard; the app builds it only when they choose Build it.`;
 
 export interface InterviewState {
   history: Message[];
@@ -469,8 +470,10 @@ export async function interviewTurn(llm: Llm, state: InterviewState, input: Inte
     const next = nextFact(profile);
     if (next) return { history, profile, deferred: state.deferred, prompt: factPrompt(next, profile), ready: false, usage: [], instant: true };
     if (state.deferred) {
-      const prompt = { ...state.deferred, note: factsSummary(profile) };
-      return { history: [...history, { role: "assistant", text: promptText(prompt) }], profile, prompt, ready: false, usage: [], instant: true };
+      if (state.deferred.topic !== "wrap_up" || profileReady(profile)) {
+        const prompt = settle({ ...state.deferred, note: factsSummary(profile) });
+        return { history: [...history, { role: "assistant", text: promptText(prompt) }], profile, prompt, ready: isReady(profile, prompt, false), usage: [], instant: true };
+      }
     }
     return modelTurn(llm, history, profile, factsSummary(profile), onPartial);
   }
@@ -506,6 +509,7 @@ async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile,
   }
   let prompt = toPrompt(value);
   if (prompt.topic === "wrap_up" && !profileReady(merged)) prompt = missingPrompt(merged, prompt.note);
+  prompt = settle(prompt);
   if (leadNote) prompt = { ...prompt, note: [leadNote, prompt.note].filter(Boolean).join(" ") };
   const fact = nextFact(merged);
   const shown = fact ? factPrompt(fact, merged, prompt.note) : prompt;
@@ -514,11 +518,26 @@ async function modelTurn(llm: Llm, history: Message[], profile: BusinessProfile,
     profile: merged,
     deferred: fact ? prompt : undefined,
     prompt: shown,
-    // Code, not the model, has the final say on readiness.
-    ready: !fact && value.enoughToDesign && profileReady(merged),
+    ready: !fact && isReady(merged, prompt, value.enoughToDesign),
     usage: usages,
     instant: false,
   };
+}
+
+/**
+ * Code, not the model, has the final say on readiness. A wrap-up is shown
+ * only when the profile is ready, and a ready wrap-up always means ready, so
+ * its Build it button builds instead of going back to the model.
+ */
+function isReady(p: BusinessProfile, prompt: InterviewPrompt, enoughToDesign: boolean): boolean {
+  return !nextFact(p) && profileReady(p) && (enoughToDesign || prompt.topic === "wrap_up");
+}
+
+/** A wrap-up always offers the same two answers, which the app knows how to act on. */
+export const BUILD_OPTION = "Build it";
+function settle(prompt: InterviewPrompt): InterviewPrompt {
+  if (prompt.topic !== "wrap_up") return prompt;
+  return { ...prompt, input: { kind: "confirm", options: [BUILD_OPTION, "One more thing"], placeholder: "" } };
 }
 
 /** Last resort when the model still wraps up early: a plain question for the first thing profileReady needs. */

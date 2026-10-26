@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MAX_MESSAGE, OPENING_PROMPT, availableReports, profileReady, progress, type Attachment, type BusinessProfile, type InterviewPrompt, type Message, type PartialPrompt } from "@shapewise/ai/client";
+import { BUILD_OPTION, MAX_MESSAGE, OPENING_PROMPT, availableReports, profileReady, progress, type Attachment, type BusinessProfile, type InterviewPrompt, type Message, type PartialPrompt } from "@shapewise/ai/client";
 import { REPORT_BY_KEY, REPORT_CATEGORY_LABEL, applyOps, type Blueprint, type OverlayOp } from "@shapewise/blueprint";
 import { Button, StatusPill, cx } from "@shapewise/ui";
 import { AttachmentList, Choices, Composer, Thinking, readStream, useAttachments, useStickToBottom, useTypewriter } from "@/components/ai-bits";
@@ -50,6 +50,9 @@ const STARTERS = [
 ];
 
 const strip = (a: Attachment[] | undefined) => a?.map(({ dataUrl: _d, ...rest }) => rest);
+
+/** Short replies that mean "go ahead and build". */
+const BUILD_INTENT = /^(build|launch|yes|yep|yeah|ok|okay|sure|go|go ahead|do it|start|create|ready|take me there|let'?s go)\b[\s\w!.,']{0,24}$/i;
 
 export function AiOnboarding({ firstName }: { firstName?: string }) {
   const router = useRouter();
@@ -115,7 +118,8 @@ export function AiOnboarding({ firstName }: { firstName?: string }) {
     const attachments = files.ready();
     const message = text.trim() || (attachments.length ? "Here's what I use today." : "");
     if (!message || pending || files.busy) return;
-    if (ready && /^build/i.test(message)) return startBuild();
+    // Once ready, agreeing to the wrap-up builds; it never goes back to the model to "launch".
+    if (ready && (/^build/i.test(message) || (current?.topic === "wrap_up" && (message === BUILD_OPTION || BUILD_INTENT.test(message))))) return startBuild();
     if (message.length > MAX_MESSAGE) {
       setError(`That message is ${message.length.toLocaleString("en-LK")} characters, more than the ${MAX_MESSAGE.toLocaleString("en-LK")} I can read at once. Attach it as a file instead, or paste the main points.`);
       return;

@@ -64,4 +64,35 @@ describe("interview", () => {
     expect(r.ready).toBe(false);
     expect(r.usage).toHaveLength(2);
   });
+
+  const wrapUp = { note: "Quotes through to billing.", question: "Anything else before I build?", topic: "wrap_up", input: { kind: "confirm", options: ["Launch", "Wait"], placeholder: "" }, profile: {}, enoughToDesign: false };
+  const fakeLlm = (value: unknown): Llm => ({
+    provider: "gemini",
+    turn: async () => {
+      throw new Error("unused");
+    },
+    json: async () => ({ value, usage: { input: 1, output: 1, model: "fake" } }) as never,
+  });
+  const complete = {
+    businessName: "Lanka Bakes", whatTheyDo: "Bakes to order", products: ["Cakes"], customers: ["Cafés"], makesThings: true,
+    country: "LK", teamSize: "11_50", turnover: "60_250m", taxRegistrations: ["vat"], taxConfirmed: true,
+    team: ["Owner"], reportsConfirmed: true, reportPlaces: ["Dashboard"],
+  } as const;
+
+  it("a wrap-up on a ready profile is always ready, with the build answer the app acts on", async () => {
+    const { nextFact } = await import("../src");
+    expect(nextFact({ ...complete } as never)).toBeUndefined();
+    const r = await interviewTurn(fakeLlm(wrapUp), { history: [], profile: { ...complete } as never }, { message: "That's all" });
+    expect(r.ready).toBe(true);
+    expect(r.prompt.input.options).toEqual(["Build it", "One more thing"]);
+  });
+
+  it("a held back wrap-up shown after the last fact is ready", async () => {
+    const deferred = { note: "", question: "Anything else before I build?", topic: "wrap_up", section: "paperwork", topicLabel: "Ready to build", input: { kind: "confirm", options: ["Build it", "One more thing"], placeholder: "" } } as const;
+    const { reportPlaces: _p, ...almost } = complete;
+    const r = await interviewTurn(fakeLlm(wrapUp), { history: [], profile: { ...almost } as never, deferred: deferred as never }, { message: "Dashboard", answering: "reportPlaces" });
+    expect(r.instant).toBe(true);
+    expect(r.prompt.topic).toBe("wrap_up");
+    expect(r.ready).toBe(true);
+  });
 });
